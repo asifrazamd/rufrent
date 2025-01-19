@@ -14,8 +14,7 @@ const joins = {
         LEFT JOIN st_parking_count spc ON dy.parking_count_id = spc.id
         LEFT JOIN st_deposit_range sdr ON dy.deposit_range_id = sdr.id
         LEFT JOIN st_maintenance sm ON dy.maintenance_id = sm.id
-        LEFT JOIN dy_landmarks dl ON dy.community_id = dl.community_id
-        LEFT JOIN st_landmarks_category slc ON dl.landmark_category_id = slc.id
+
 
     `,
   fieldNames1: `
@@ -50,11 +49,7 @@ const joins = {
         dy.flat_no,
         dy.images_location,
         sb.name AS builder_name,
-        scity.name AS city_name,
-        dl.landmark_name AS landmark_name,
-        dl.distance AS distance,
-        dl.landmark_category_id AS landmark_category_id,
-        slc.landmark_category AS landmark_category 
+        scity.name AS city_name
 
     `,
 };

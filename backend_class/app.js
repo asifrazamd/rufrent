@@ -8,6 +8,7 @@ const bodyParser = require('body-parser'); // Middleware for parsing request bod
 const tablesRoutes = require('./routes/tablesRoutes'); // Importing routes for table operations
 const signupLoginRoutes = require('./routes/signupLoginRoutes'); // Importing routes for signup and login
 const adminRoutes=require('./routes/adminRoutes');
+const paymentRoutes = require('./routes/paymentRoutes'); // Importing routes for user operations
 const cors = require('cors'); // Middleware for enabling Cross-Origin Resource Sharing (CORS)
 
 const app = express(); // Creating an Express application instance
@@ -27,6 +28,8 @@ app.use('/api', tablesRoutes); // Routes starting with /api are handled by table
 app.use('/api', signupLoginRoutes); // Routes starting with /api are handled by signupLoginRoutes
 
 app.use('/api',adminRoutes);
+
+app.use('/api/payments',paymentRoutes);
 
 // Start the server
 const PORT = 5000; // Define the port number the server will listen on

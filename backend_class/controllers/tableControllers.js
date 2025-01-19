@@ -6,9 +6,6 @@ require("dotenv").config();
 const BaseController = require("../utils/baseClass"); // Adjust the path as needed
 
 class FMController extends BaseController {
-  // constructor() {
-  //   this.dbService = new DatabaseService(); // Create an instance of DatabaseService
-  // }
 
   /**
    * Fetches FM (Facility Manager) list for a given community ID.
@@ -39,11 +36,15 @@ class FMController extends BaseController {
 
       // Define the JOIN clauses to link the main table with other tables
       const joinClauses = `LEFT JOIN dy_user u ON r.fm_id = u.id
-      LEFT JOIN dy_user u2 ON r.rm_id = u2.id`; // Join clause for fetching FM data
+      LEFT JOIN dy_user u2 ON r.rm_id = u2.id
+            LEFT JOIN st_community c ON r.community_id = c.id
+`; 
       // Define the fields to select from the database
       const fieldNames = `r.fm_id, u.user_name AS fm_name,
-            r.rm_id, u2.user_name AS rm_name
-`; // Fields to select
+            r.rm_id, u2.user_name AS rm_name,
+                  r.community_id, c.name AS community_name
+
+`;  
 
       // If community_id is provided, escape it to prevent SQL injection
       const whereCondition = community_id
@@ -82,9 +83,6 @@ class FMController extends BaseController {
 }
 
 class PropertyController extends BaseController {
-  // constructor() {
-  //   this.dbService = new DatabaseService(); // Instance of DatabaseService
-  // }
 
   /**
    * Fetches property details based on the provided filters and pagination parameters.
@@ -94,6 +92,9 @@ class PropertyController extends BaseController {
    *
    * @returns {Promise<void>} - Sends a response with property details or an error message.
    */
+
+
+
   async showPropDetails(req, res) {
     try {
       const {
@@ -108,122 +109,162 @@ class PropertyController extends BaseController {
         page = 1,
         limit = 6,
       } = req.query;
-
+  
       const sanitizedPage = Math.max(1, parseInt(page, 10));
       const sanitizedLimit = Math.max(1, parseInt(limit, 10));
       const offset = (sanitizedPage - 1) * sanitizedLimit;
-
+  
       const tableName = "dy_property dy";
       const joinClauses = `
         ${propertyFields}
       `;
       const fieldNames = fieldNames1;
-
+  
       const whereClauses = [];
-
+  
       if (user_id) whereClauses.push(`dy.user_id = ${db.escape(user_id)}`);
       if (property_id) whereClauses.push(`dy.id = ${db.escape(property_id)}`);
       if (current_status)
         whereClauses.push(`dy.current_status = ${db.escape(current_status)}`);
-
+  
       if (city) {
         const cityArray = city.split(",").map((c) => c.trim());
         const escapedCities = cityArray.map((c) => db.escape(c)).join(", ");
-        whereClauses.push(`scity.id IN (${escapedCities})`);
+        whereClauses.push(`dy.city IN (${escapedCities})`);
       }
       if (builders) {
         const buildersArray = builders.split(",").map((b) => b.trim());
-        const escapedBuilders = buildersArray
-          .map((b) => db.escape(b))
-          .join(", ");
-        whereClauses.push(`sb.id IN (${escapedBuilders})`);
+        const escapedBuilders = buildersArray.map((b) => db.escape(b)).join(", ");
+        whereClauses.push(`db.id IN (${escapedBuilders})`);
       }
       if (community) {
         const communityArray = community.split(",").map((c) => c.trim());
         const escapedCommunities = communityArray
           .map((c) => db.escape(c))
           .join(", ");
-        whereClauses.push(`sc.id IN (${escapedCommunities})`);
+        whereClauses.push(`dc.id IN (${escapedCommunities})`);
       }
       if (hometype) {
         const hometypeArray = hometype.split(",").map((h) => h.trim());
         const escapedHometypes = hometypeArray
           .map((h) => db.escape(h))
           .join(", ");
-        whereClauses.push(`dy.home_type_id IN (${escapedHometypes})`);
+        whereClauses.push(`dht.id IN (${escapedHometypes})`);
       }
       if (propertydescription) {
         const propertyDescArray = propertydescription
           .split(",")
           .map((d) => d.trim());
-        const escapedDescs = propertyDescArray
-          .map((d) => db.escape(d))
-          .join(", ");
-        whereClauses.push(`dy.prop_desc_id IN (${escapedDescs})`);
+        const escapedDescs = propertyDescArray.map((d) => db.escape(d)).join(", ");
+        whereClauses.push(`dpd.id IN (${escapedDescs})`);
       }
-
+  
       const whereCondition =
         whereClauses.length > 0 ? whereClauses.join(" AND ") : "1";
-
-      // Fetch data using the DatabaseService
-      const results = await this.dbService.getJoinedData(
+  
+      // Fetch property data
+      const properties = await this.dbService.getJoinedData(
         tableName,
         joinClauses,
         fieldNames,
         whereCondition
       );
-
-      const paginatedResults = results.slice(offset, offset + sanitizedLimit);
-      const totalRecords = results.length;
+  
+      const paginatedProperties = properties.slice(
+        offset,
+        offset + sanitizedLimit
+      );
+      const totalRecords = properties.length;
       const totalPages = Math.ceil(totalRecords / sanitizedLimit);
-
-      if (paginatedResults.length === 0) {
+  
+      if (paginatedProperties.length === 0) {
         return res.status(404).json({
           error: "No properties found for the given filters or page.",
         });
       }
-
-      const enhancedResults = paginatedResults.map((property) => {
-        const address = property.address || "";
-        const pincodeMatch = address.match(/\b\d{6}\b/);
-        const pincode = pincodeMatch ? pincodeMatch[0] : null;
-        const pincodeUrl = pincode
-          ? `https://api.postalpincode.in/pincode/${pincode}`
-          : null;
-
-        return {
-          ...property,
-          pincode,
-          pincode_url: pincodeUrl,
-        };
-      });
-
+  
+      // Extract community IDs from properties
+      const communityIds = paginatedProperties.map((p) => p.community_id);
+      const uniqueCommunityIds = [...new Set(communityIds)];
+  
+      // Fetch landmarks for the extracted community IDs
+      const landmarksTable = `dy_landmarks dl`;
+      const landmarksJoinClauses = `
+        LEFT JOIN st_landmarks_category slc ON dl.landmark_category_id = slc.id
+      `;
+      const landmarksFieldNames = `
+        dl.community_id,
+        dl.landmark_name,
+        dl.distance,
+        dl.landmark_category_id,
+        slc.landmark_category
+      `;
+      const landmarksWhereCondition =
+        uniqueCommunityIds.length > 0
+          ? `dl.community_id IN (${uniqueCommunityIds.map((id) =>
+              db.escape(id)
+            )})`
+          : "1";
+  
+      const landmarks = await this.dbService.getJoinedData(
+        landmarksTable,
+        landmarksJoinClauses,
+        landmarksFieldNames,
+        landmarksWhereCondition
+      );
+  
+      // Organize landmarks by community ID
+      const landmarksByCommunity = landmarks.reduce((acc, landmark) => {
+        if (!acc[landmark.community_id]) {
+          acc[landmark.community_id] = [];
+        }
+        acc[landmark.community_id].push(landmark);
+        return acc;
+      }, {});
+  
+      // Remove duplicates and enhance properties
+      const enhancedProperties = paginatedProperties.reduce((acc, property) => {
+        if (!acc.some((p) => p.id === property.id)) {
+          const address = property.address || "";
+          const pincodeMatch = address.match(/\b\d{6}\b/);
+          const pincode = pincodeMatch ? pincodeMatch[0] : null;
+          const pincodeUrl = pincode
+            ? `https://api.postalpincode.in/pincode/${pincode}`
+            : null;
+  
+          acc.push({
+            ...property,
+            pincode,
+            pincode_url: pincodeUrl,
+            landmarks: landmarksByCommunity[property.community_id] || [],
+          });
+        }
+        return acc;
+      }, []);
+  
       res.status(200).json({
-        message: property_id
-          ? `Details for property ID: ${property_id}`
-          : `All property details`,
+        message: "Property and landmarks fetched successfully.",
         pagination: {
           currentPage: sanitizedPage,
           totalPages,
           totalRecords,
           limit: sanitizedLimit,
         },
-        results: enhancedResults,
+        properties: enhancedProperties,
       });
     } catch (error) {
-      console.error("Error fetching property details:", error.message);
+      console.error("Error fetching property and landmark details:", error);
       res.status(500).json({
-        error: "An error occurred while fetching property details.",
+        error: "An error occurred while fetching property and landmark details.",
         details: error.message,
       });
     }
   }
+  
+  
 }
 
 class UserActionsController extends BaseController {
-  // constructor() {
-  //   this.dbService = new DatabaseService(); // Instance of DatabaseService
-  // }
 
   /**
    * Fetches user actions based on provided filters.
@@ -255,13 +296,7 @@ LEFT JOIN
           ua.id AS action_id,
     scd.status_code AS status_description,
     scd.id as status_code_id,
-    dy.id AS property_id,
-    spt.prop_type AS prop_type,
-    sht.home_type AS home_type,
-    spd.prop_desc AS prop_desc,
-    sc.name AS community_name,
-    sc.address AS address,
-    dy.images_location
+    ${fieldNames1}
       `;
 
       // Build dynamic WHERE clause
@@ -288,11 +323,50 @@ LEFT JOIN
           error: "No user actions found for the provided filters.",
         });
       }
+      // Fetch matching properties for the given user_id
+let userProperties = [];
+if (user_id) {
+  const mainTable = "dy_transactions dt";
+  const joinClauses = `
+    LEFT JOIN dy_user_actions dua ON dua.user_id = dt.user_id
+    LEFT JOIN dy_user u ON dt.rm_id = u.id
+  `;
+  const fields = "dt.prop_id,u.user_name,u.mobile_no";
+  const whereClause = `dua.user_id = ${db.escape(user_id)}`;
+
+  // Fetch data using getJoinedData
+  userProperties = await this.dbService.getJoinedData(
+    mainTable,
+    joinClauses,
+    fields,
+    whereClause
+  );
+      // Extract distinct property IDs along with user_name
+  const uniqueProperties = [];
+  const seenProps = new Set();
+
+  userProperties.forEach((item) => {
+    if (!seenProps.has(item.prop_id)) {
+      seenProps.add(item.prop_id);
+      uniqueProperties.push({
+        prop_id: item.prop_id,
+        user_name: item.user_name,
+        RM_mobile_no:item.mobile_no
+      });
+    }
+  });
+
+  userProperties = uniqueProperties;
+
+
+}
+
 
       // Send the response with results
       res.status(200).json({
         message: "User actions retrieved successfully.",
         results,
+        userProperties
       });
     } catch (error) {
       console.error("Error fetching user actions:", error.message);
@@ -305,9 +379,6 @@ LEFT JOIN
 }
 
 class TaskController extends BaseController {
-  // constructor() {
-  //   this.dbService = new DatabaseService(); // Database service instance
-  // }
 
   /**
    * Retrieves tasks based on RM or FM ID.
@@ -316,182 +387,7 @@ class TaskController extends BaseController {
    * @param {Object} res - Express response object.
    * @returns {Promise<void>} - Sends response with task data or error message.
    */
-  // async getTasks(req, res) {
-  //   try {
-  //     const { rm_id, fm_id } = req.query;
 
-  //     // Validate input
-  //     if (!rm_id && !fm_id) {
-  //       return res
-  //         .status(400)
-  //         .json({ error: "Either rm_id or fm_id is required." });
-  //     }
-
-  //     const idValue = rm_id || fm_id;
-  //     const idColumn = rm_id ? "rm_id" : "fm_id";
-
-  //     if (isNaN(idValue)) {
-  //       return res
-  //         .status(400)
-  //         .json({ error: `Invalid ${idColumn}. Must be a number.` });
-  //     }
-
-  //     // Fetch main task data
-  //     const mainTable = "dy_transactions dt";
-  //     const joinClauses = `
-  //       LEFT JOIN dy_user u1 ON dt.user_id = u1.id
-  //       LEFT JOIN dy_property p ON dt.prop_id = p.id
-  //       LEFT JOIN dy_user u2 ON p.user_id = u2.id
-  //       LEFT JOIN st_community c ON p.community_id = c.id
-  //       LEFT JOIN st_current_status cs ON dt.cur_stat_code = cs.id
-  //     `;
-  //     const fields = `
-  //       dt.id AS transaction_id,
-  //       c.id AS community_id,
-  //       c.name AS community_name,
-  //       u2.user_name AS owner_name,
-  //       u2.mobile_no AS owner_mobile,
-  //       u1.user_name AS tenant_name,
-  //       u1.mobile_no AS tenant_mobile,
-  //       dt.cur_stat_code AS curr_stat_code_id,
-  //       cs.status_code AS curr_stat_code,
-  //       dt.schedule_date AS schedule_date,
-  //       dt.schedule_time AS schedule_time
-  //     `;
-  //     //const whereCondition = `${idColumn} = ${db.escape(idValue)}`;
-  //     const whereCondition = rm_id || fm_id
-  //     ? `${rm_id ? "rm_id" : "fm_id"} = ${db.escape(rm_id || fm_id)}`
-  //     : "1 = 1"; // No filtering if no IDs are provided
-
-  //     const taskResults = await this.dbService.getJoinedData(
-  //       mainTable,
-  //       joinClauses,
-  //       fields,
-  //       whereCondition
-  //     );
-
-  //     if (!taskResults || taskResults.length === 0) {
-  //       return res
-  //         .status(404)
-  //         .json({ error: "No records found for the provided rm_id or fm_id." });
-  //     }
-
-  //     // Fetch status data
-  //     const statusCondition = rm_id
-  //       ? 'status_category="RMA" OR status_category="FMA"'
-  //       : 'status_category="FMA"';
-  //       const tableName=`st_current_status`;
-  //       const fieldNames=`id, status_code`;
-  //       const whereClause=statusCondition;
-  //         // Fetch status data
-
-  //     const statusResults = await this.dbService.getRecordsByFields(
-  //       tableName,
-  //       fieldNames,
-  //       whereClause
-  //     );
-
-  //     if (rm_id) {
-  //       console.log("21", rm_id);
-
-  //       // Fetch community IDs associated with RM
-  //       const communityIdsQuery = {
-  //         tbl_name: "dy_rm_fm_com_map",
-  //         field_names: "community_id",
-  //         where_condition: `rm_id = ${db.escape(rm_id)}`,
-  //       };
-
-  //       const communityResults = await this.dbService.getRecordsByFields(
-  //         communityIdsQuery.tbl_name,
-  //         communityIdsQuery.field_names,
-  //         communityIdsQuery.where_condition
-  //       );
-
-  //       console.log("22", communityResults);
-
-  //       // Ensure communityResults is correctly structured
-  //       const communityIds = communityResults.map((row) => row.community_id);
-
-  //       console.log("23", communityIds);
-
-  //       // Check if communityIds is empty
-  //       if (communityIds.length === 0) {
-  //         console.error("No community IDs found");
-  //         return;
-  //       }
-  //       // Continue with property query...
-
-  //       // Fetch properties associated with the communities
-  //       const propertyTable = "dy_property dy";
-  //       const propertyJoinClauses = `
-  //         LEFT JOIN dy_user u1 ON dy.user_id = u1.id
-  //         LEFT JOIN dy_transactions dt ON dy.id = dt.prop_id
-  //         LEFT JOIN dy_user u2 ON dt.user_id = u2.id
-  //       `;
-  //       const propertyFields = `
-  //         dy.id AS property_id,
-  //         dy.community_id,
-  //         u1.user_name AS owner_name,
-  //         u1.mobile_no AS owner_mobile,
-  //         u2.user_name AS tenant_name,
-  //         u2.mobile_no AS tenant_mobile
-  //       `;
-
-  //       // Ensure the communityIds array is not empty before using it in the IN clause
-  //       if (communityIds.length > 0) {
-  //         console.log("24",communityIds)
-  //         const propertyCondition = `community_id IN (${communityIds.join(", ")})`;
-  //         console.log("25",propertyCondition);
-
-  //         const associatedProperties = await this.dbService.getJoinedData(
-  //           propertyTable,
-  //           propertyJoinClauses,
-  //           propertyFields,
-  //           propertyCondition
-  //         );
-
-  //     // Extract the first element of the array, which contains the rows
-  //     const propertyRows =
-  //       Array.isArray(associatedProperties) && associatedProperties.length > 0
-  //         ? associatedProperties[0]
-  //         : [];
-
-  //     // Handle no properties found
-  //     if (!propertyRows || propertyRows.length === 0) {
-  //       console.error("No associated properties found.");
-  //       return res
-  //         .status(404)
-  //         .json({ message: "No properties found for the given communities." });
-  //     }
-
-  //         // Send response
-  //         return res.status(200).json({
-  //           message: "Data retrieved successfully.",
-  //           result: taskResults[0],
-  //           status: statusResults,
-  //           associatedProperties: propertyRows,
-  //         });
-  //       } else {
-  //         return res
-  //           .status(404)
-  //           .json({ error: "No properties found for the given RM." });
-  //       }
-  //     }
-
-  //     // Send response for FM ID case
-  //     res.status(200).json({
-  //       message: "Data retrieved successfully.",
-  //       result: taskResults[0],
-  //       status: statusResults,
-  //     });
-  //   } catch (error) {
-  //     console.error("Error in getTasks:", error);
-  //     res.status(500).json({
-  //       error: "An error occurred while retrieving task data.",
-  //       details: error.message,
-  //     });
-  //   }
-  // }
   async getTasks(req, res) {
     try {
       const { rm_id, fm_id, community_id } = req.query;
@@ -526,10 +422,6 @@ class TaskController extends BaseController {
         fm_user.user_name AS fm_name
 
       `;
-      // const whereCondition =
-      //   rm_id || fm_id
-      //     ? `${rm_id ? "rm_id" : "fm_id"} = ${db.escape(rm_id || fm_id)}`
-      //     : "1 = 1"; // No filtering if no IDs are provided
       const conditions = [];
       if (rm_id) conditions.push(`rm_id = ${db.escape(rm_id)}`);
       if (fm_id) conditions.push(`fm_id = ${db.escape(fm_id)}`);
@@ -621,9 +513,6 @@ class TaskController extends BaseController {
 }
 
 class updateTask extends BaseController {
-  // constructor() {
-  //   this.dbService = new DatabaseService(); // Create an instance of DatabaseService
-  // }
 
   /**
    * Updates a task based on the provided details.
@@ -718,9 +607,6 @@ class updateTask extends BaseController {
 }
 
 class addNewRecord extends BaseController {
-  // constructor() {
-  //   this.dbService = new DatabaseService(); // Create an instance of DatabaseService
-  // }
 
   /**
    * Adds a new record to the specified table.
@@ -786,9 +672,6 @@ class addNewRecord extends BaseController {
 }
 
 class getRecords extends BaseController {
-  // constructor() {
-  //   this.dbService = new DatabaseService(); // Create an instance of DatabaseService
-  // }
 
   /**
    * Fetches records from the specified table based on given fields and an optional condition.
@@ -851,9 +734,6 @@ class getRecords extends BaseController {
 }
 
 class updateRecord extends BaseController {
-  // constructor() {
-  //   this.dbService = new DatabaseService(); // Create an instance of DatabaseService
-  // }
 
   /**
    * Updates a record in the specified table based on given field-value pairs and an optional condition.
@@ -918,9 +798,6 @@ class updateRecord extends BaseController {
 }
 
 class deleteRecord extends BaseController {
-  // constructor() {
-  //   this.dbService = new DatabaseService(); // Create an instance of DatabaseService
-  // }
 
   /**
    * Deletes records from the specified table based on an optional condition.
@@ -993,9 +870,6 @@ class deleteRecord extends BaseController {
 }
 
 class addRmTask extends BaseController {
-  // constructor() {
-  //   this.dbService = new DatabaseService(); // Instantiate the DatabaseService
-  // }
 
   /**
    * Assigns a Relationship Manager (RM) to a transaction.
@@ -1003,113 +877,7 @@ class addRmTask extends BaseController {
    * @param {Object} req - Express request object containing user_id and property_id in the body.
    * @param {Object} res - Express response object for sending responses.
    */
-  // async addRmTask(req, res) {
-  //   const { user_id, property_id } = req.body; // Extract user_id and property_id from the request body
-  //   console.log("req", req.body);
 
-  //   // Validate the input: Ensure both user_id and property_id are provided
-  //   if (!user_id || !property_id) {
-  //     return res.status(400).json({
-  //       error: 'user_id and property_id are required.',
-  //     });
-  //   }
-
-  //   try {
-  //     // Step 1: Fetch the community_id from the dy_property table
-  //     const properties = await this.dbService.getRecordsByFields(
-  //       'dy_property',
-  //       'community_id',
-  //       `id = ${db.escape(property_id)}`
-  //     );
-  //     console.log("2", properties);
-
-  //     if (!properties || properties.length === 0) {
-  //       return res.status(404).json({ error: 'Property not found.' });
-  //     }
-
-  //     const community_id = properties[0].community_id;
-  //     console.log("3", community_id);
-
-  //     // Step 1.1: Check if a transaction already exists for the given user_id and property_id
-  //     const existingTransaction = await this.dbService.getRecordsByFields(
-  //       'dy_transactions',
-  //       'rm_id',
-  //       `user_id = ${db.escape(user_id)} AND prop_id = ${db.escape(property_id)}`
-  //     );
-
-  //     let rm_id;
-  //     let rm_mobile_number = false; // Default to false for mobile number
-
-  //     if (existingTransaction && existingTransaction.length > 0) {
-  //       // If transaction exists, use the rm_id from the existing transaction
-  //       rm_id = existingTransaction[0].rm_id;
-  //       console.log("Existing RM ID:", rm_id);
-
-  //       // Fetch the mobile number of the RM from dy_user table
-  //       const rmUser = await this.dbService.getRecordsByFields(
-  //         'dy_user',
-  //         'mobile_no',
-  //         `id = ${db.escape(rm_id)}`
-  //       );
-
-  //       if (rmUser && rmUser.length > 0) {
-  //         rm_mobile_number = rmUser[0].mobile_no;
-  //       }
-  //     } else {
-  //       // Step 2: If no existing transaction, find the optimal RM (least number of transactions)
-  //       const rmResults = await this.dbService.getGroupedData(
-  //         'dy_transactions',
-  //         'rm_id',  // Group by rm_id
-  //         'id',     // Aggregate by counting the id field (transactions)
-  //         'COUNT',  // Aggregate function (COUNT)
-  //         ''        // No WHERE condition
-  //       );
-
-  //       console.log("4", rmResults);
-
-  //       // Filter out entries with null rm_id and handle missing transaction_count
-  //       const validRmResults = rmResults.filter(rm => rm.rm_id !== null && rm.Agg_Res !== null);
-  //       console.log("Filtered RM Results:", validRmResults);
-
-  //       if (!validRmResults || validRmResults.length === 0) {
-  //         return res.status(404).json({ error: 'No valid Relationship Managers found.' });
-  //       }
-
-  //       // Sort the results by the transaction count (Agg_Res)
-  //       rm_id = validRmResults.sort((a, b) => a.Agg_Res - b.Agg_Res)[0].rm_id;
-  //       console.log("Optimal RM ID:", rm_id);
-
-  //       // Step 3: Insert the new transaction into dy_transactions
-  //       const insertFields = 'user_id, prop_id, rm_id, cur_stat_code';
-  //       const insertValues = [
-  //         user_id,
-  //         property_id,
-  //         rm_id,
-  //         1, // Assuming 1 is the default status code
-  //       ];
-  //       console.log("6", insertFields, insertValues);
-
-  //       await this.dbService.addNewRecord('dy_transactions', insertFields, insertValues);
-  //     }
-
-  //     // Respond with success or failure based on the existence of the transaction
-  //     res.status(200).json({
-  //       message: existingTransaction && existingTransaction.length > 0
-  //         ? 'Transaction already exists.'
-  //         : 'Transaction assigned successfully.',
-  //       assigned_rm_id: rm_id,
-  //       rm_mobile_number: rm_mobile_number,
-  //     });
-
-  //   } catch (error) {
-  //     // Log the error and send an error response
-  //     console.error('Error assigning RM to transaction:', error.message);
-  //     res.status(500).json({
-  //       error: 'An error occurred while assigning the transaction.',
-  //       details: error.message,
-  //     });
-  //   }
-  // }
   async addRmTask(req, res) {
     const { user_id, property_id } = req.body; // Extract user_id and property_id from the request body
     console.log("req", req.body);
@@ -1225,9 +993,6 @@ class addRmTask extends BaseController {
 }
 
 class getPropertyAndRequestStats extends BaseController {
-  // constructor() {
-  //   this.dbService = new DatabaseService(); // Create an instance of DatabaseService
-  // }
 
   /**
    * Fetches total properties, pending properties, total requests, and total communities.
@@ -1294,9 +1059,6 @@ class getPropertyAndRequestStats extends BaseController {
 }
 
 class getTopCommunities extends BaseController {
-  // constructor() {
-  //   this.dbService = new DatabaseService(); // Create an instance of DatabaseService
-  // }
 
   /**
    * Fetches the top 4 community names based on transaction count.
@@ -1315,64 +1077,7 @@ class getTopCommunities extends BaseController {
    * // Example request: GET /api/getTopCommunities
    * // Example response: { message: "Retrieved successfully.", result: [...] }
    */
-  // async getTopCommunities(req, res) {
-  //   try {
-  //     console.log('Starting to fetch top communities...');
 
-  //     // Define the main table and its alias for the query
-  //     const mainTable = 'dy_transactions t'; // Main table alias
-  //     console.log('Main table set:', mainTable);
-
-  //     // Define the JOIN clauses to link the main table with other tables
-  //     const joinClauses = `
-  //       INNER JOIN dy_property p ON t.prop_id = p.id
-  //       INNER JOIN st_community c ON p.community_id = c.id  // Use alias 'c'
-  //     `;
-  //     console.log('Join clauses:', joinClauses);
-
-  //     // Define the fields to select from the database
-  //     const fields = `
-  //       c.name AS community_name,  // Using alias 'c'
-  //       COUNT(t.prop_id) AS transaction_count
-  //     `;
-  //     console.log('Fields selected:', fields);
-
-  //     // Define the full SQL query
-  //     const query = `
-  //       SELECT c.name AS community_name, COUNT(t.prop_id) AS transaction_count
-  //       FROM dy_transactions t
-  //       INNER JOIN dy_property p ON t.prop_id = p.id
-  //       INNER JOIN st_community c ON p.community_id = c.id
-  //       GROUP BY c.name
-  //       ORDER BY transaction_count DESC
-  //       LIMIT 4;
-  //     `;
-  //     console.log('Query:', query);
-
-  //     // Execute the query directly
-  //     const [rows] = await db.execute(query);
-  //     console.log('Fetched data:', rows);
-
-  //     // If no data is returned, send a response indicating no communities found
-  //     if (!rows || rows.length === 0) {
-  //       console.log('No data found for communities.');
-  //       return res.status(404).json({ message: 'No communities found.' });
-  //     }
-
-  //     // Return the results in a successful response
-  //     res.status(200).json({
-  //       message: 'Retrieved successfully.',
-  //       result: rows,
-  //     });
-  //   } catch (error) {
-  //     // Log and return any errors that occur during the process
-  //     console.error('Error fetching top communities:', error.message);
-  //     res.status(500).json({
-  //       error: 'An error occurred while fetching top communities.',
-  //       details: error.message, // Provide the error details for debugging
-  //     });
-  //   }
-  // }
 
   async getTopCommunities(req, res) {
     try {
@@ -1430,69 +1135,9 @@ INNER JOIN st_community ON p.community_id = st_community.id
   }
 }
 
-class ReportController extends BaseController {
-  // constructor() {
-  //   this.dbService = new DatabaseService(); // Create an instance of DatabaseService
-  // }
 
-  /**
-   * Generates a property report that counts the number of properties added each week.
-   * The report aggregates the data by year and week based on the `rec_add_time` field.
-   *
-   * @param {Object} req - Express request object.
-   * @param {Object} res - Express response object used to send back the response.
-   *
-   * @returns {Promise<void>} - The function does not return anything explicitly but sends a response to the client.
-   *
-   * @throws {Error} - If any error occurs during the database operation, it will be caught and returned in the response.
-   */
-  async ReportController(req, res) {
-    try {
-      // SQL query to fetch the report data
-      const sqlQuery = `
-        SELECT 
-          YEAR(rec_add_time) AS year,
-          WEEK(rec_add_time) AS week,
-          COUNT(*) AS total_properties
-        FROM 
-          dy_property
-        GROUP BY 
-          YEAR(rec_add_time),
-          WEEK(rec_add_time)
-        ORDER BY 
-          year DESC, week DESC;
-      `;
-
-      // Execute the SQL query using the DatabaseService
-      const [rows] = await this.dbService.executeRawQuery(sqlQuery);
-
-      // Check if no records are found
-      if (!rows || rows.length === 0) {
-        return res
-          .status(404)
-          .json({ error: "No property records found for the report." });
-      }
-
-      // Return the results in a successful response
-      res.status(200).json({
-        message: "Property Report generated successfully.",
-        result: rows, // Aggregated data by year and week
-      });
-    } catch (error) {
-      // Log and return any errors that occur during the process
-      console.error("Error generating property report:", error.message);
-      res.status(500).json({
-        error: "An error occurred while generating the property report.",
-        details: error.message, // Provide the error details for debugging
-      });
-    }
-  }
-}
 
 class UserProfile extends BaseController {
-  // constructor() {
-  //   this.dbService = new DatabaseService(); // Create an instance of DatabaseService
-  // }
 
   /**
    * Fetches user profile information along with user details.
@@ -1556,18 +1201,6 @@ class UserProfile extends BaseController {
           .status(404)
           .json({ error: "No records found for the provided user_id." });
       }
-      // // Fetch lookup data from st_conv_mode and st_gender
-      // const [convModes, genders] = await Promise.all([
-      //   this.dbService.getRecordsByFields('st_conv_mode', 'id, conv_mode'),
-      //   this.dbService.getRecordsByFields('st_gender', 'id, gender_type'),
-      // ]);
-
-      // // Map the lookup data to the main results
-      // const mappedResults = results.map((record) => ({
-      //   ...record,
-      //   conversation_mode: convModes.find((cm) => cm.id === record.conv_mode_id)?.conv_mode || null,
-      //   gender: genders.find((g) => g.id === record.gender_id)?.gender_type || null,
-      // }));
       const conv_mode = await this.dbService.getRecordsByFields(
         "st_conv_mode",
         "id, conv_mode"
@@ -1597,9 +1230,6 @@ class UserProfile extends BaseController {
 }
 
 class UserController extends BaseController {
-  // constructor() {
-  //   this.dbService = new DatabaseService(); // Instance of DatabaseService
-  // }
 
   /**
    * Fetches all RMs (Role ID = 3) and FMs (Role ID = 4) from the dy_user table.
@@ -1679,6 +1309,8 @@ class UserController extends BaseController {
   }
 }
 
+
+
 module.exports = {
   UserActionsController,
   PropertyController,
@@ -1692,7 +1324,6 @@ module.exports = {
   updateTask,
   getPropertyAndRequestStats,
   getTopCommunities,
-  ReportController,
   UserProfile,
   UserController,
 };
