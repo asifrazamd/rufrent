@@ -3,7 +3,9 @@ require('dotenv').config();
 
 
 const express = require('express');
-const { UserActionsController, PropertyController, FMController,TaskController,addNewRecord,getRecords,updateRecord,deleteRecord,addRmTask,updateTask,getPropertyAndRequestStats,getTopCommunities,UserProfile,UserController} = require('../controllers/tableControllers');
+const { UserActionsController, PropertyController, FMController,TaskController,addNewRecord,getRecords,updateRecord,deleteRecord,addRmTask,updateTask,getPropertyAndRequestStats,getTopCommunities,UserProfile,UserController,  LandMarksController,
+    CityBasedCommunitiesController
+  } = require('../controllers/tableControllers');
 
 
 
@@ -25,6 +27,9 @@ const getPropertyAndRequestStatsController=new getPropertyAndRequestStats();
 const getTopCommunitiesController=new getTopCommunities();
 const userprofileController=new UserProfile();
 const userController=new UserController();
+const landmarksController=new LandMarksController();
+const cityBasedCommunitiesController=new CityBasedCommunitiesController();
+
 
 
 
@@ -60,6 +65,10 @@ router.put('/updateTask',(req,res)=> updateTaskController.updateTask(req,res));
 router.get('/dasboardData',(req,res)=>getPropertyAndRequestStatsController.getPropertyAndRequestStats(req,res));
 router.get('/getTopCommunities',(req,res)=> getTopCommunitiesController.getTopCommunities(req,res));
 router.get('/roles',(req,res)=> userController.getUsersByRole(req,res));
+router.get('/landmarks',(req,res)=>landmarksController.landMarks(req,res));
+router.get('/CityBasedCommunities',(req,res)=> cityBasedCommunitiesController.CityBasedCommunities(req,res));
+
+
 
 // Export the router to be used in the main app
 module.exports = router;

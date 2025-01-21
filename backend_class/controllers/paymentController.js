@@ -3,9 +3,6 @@ const BaseController = require("../utils/baseClass");
 const PaymentService = require("../utils/paymentService");
 
 class PaymentController extends BaseController {
-  // constructor() {
-  //   this.paymentService = new PaymentService();
-  // }
 
 
 async createOrder(req, res) {

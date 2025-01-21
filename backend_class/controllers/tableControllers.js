@@ -7,26 +7,7 @@ const BaseController = require("../utils/baseClass"); // Adjust the path as need
 
 class FMController extends BaseController {
 
-  /**
-   * Fetches FM (Facility Manager) list for a given community ID.
-   * This method retrieves a list of Facility Managers (FMs) for a specific community by joining the 'dy_rm_fm_com_map' and 'dy_user' tables.
-   * It returns the list of FMs associated with the provided community ID.
-   *
-   * @param {Object} req - Express request object containing the query parameters.
-   *        The community_id is extracted from `req.query` to filter the results.
-   *
-   * @param {Object} res - Express response object used to send back the response.
-   *        The results are returned as JSON with either a success message or an error message.
-   *
-   * @returns {Promise<void>} - The function does not return anything explicitly but sends a response to the client.
-   *
-   * @throws {Error} - If any error occurs during the database operation, it will be caught and returned in the response.
-   *
-   * Example:
-   *
-   * // Example request: GET /api/getFmList?community_id=1
-   * // Example response: { message: "Retrieved successfully.", result: [...] }
-   */
+
   async getFmList(req, res) {
     const { community_id } = req.query; // Extract community_id from query parameters
 
@@ -84,15 +65,6 @@ class FMController extends BaseController {
 
 class PropertyController extends BaseController {
 
-  /**
-   * Fetches property details based on the provided filters and pagination parameters.
-   *
-   * @param {Object} req - Express request object containing query parameters.
-   * @param {Object} res - Express response object used to send back the response.
-   *
-   * @returns {Promise<void>} - Sends a response with property details or an error message.
-   */
-
 
 
   async showPropDetails(req, res) {
@@ -109,153 +81,108 @@ class PropertyController extends BaseController {
         page = 1,
         limit = 6,
       } = req.query;
-  
+
       const sanitizedPage = Math.max(1, parseInt(page, 10));
       const sanitizedLimit = Math.max(1, parseInt(limit, 10));
       const offset = (sanitizedPage - 1) * sanitizedLimit;
-  
+
       const tableName = "dy_property dy";
       const joinClauses = `
         ${propertyFields}
       `;
       const fieldNames = fieldNames1;
-  
+
       const whereClauses = [];
-  
+
       if (user_id) whereClauses.push(`dy.user_id = ${db.escape(user_id)}`);
       if (property_id) whereClauses.push(`dy.id = ${db.escape(property_id)}`);
       if (current_status)
         whereClauses.push(`dy.current_status = ${db.escape(current_status)}`);
-  
+
       if (city) {
         const cityArray = city.split(",").map((c) => c.trim());
         const escapedCities = cityArray.map((c) => db.escape(c)).join(", ");
-        whereClauses.push(`dy.city IN (${escapedCities})`);
+        whereClauses.push(`scity.id IN (${escapedCities})`);
       }
       if (builders) {
         const buildersArray = builders.split(",").map((b) => b.trim());
-        const escapedBuilders = buildersArray.map((b) => db.escape(b)).join(", ");
-        whereClauses.push(`db.id IN (${escapedBuilders})`);
+        const escapedBuilders = buildersArray
+          .map((b) => db.escape(b))
+          .join(", ");
+        whereClauses.push(`sb.id IN (${escapedBuilders})`);
       }
       if (community) {
         const communityArray = community.split(",").map((c) => c.trim());
         const escapedCommunities = communityArray
           .map((c) => db.escape(c))
           .join(", ");
-        whereClauses.push(`dc.id IN (${escapedCommunities})`);
+        whereClauses.push(`sc.id IN (${escapedCommunities})`);
       }
       if (hometype) {
         const hometypeArray = hometype.split(",").map((h) => h.trim());
         const escapedHometypes = hometypeArray
           .map((h) => db.escape(h))
           .join(", ");
-        whereClauses.push(`dht.id IN (${escapedHometypes})`);
+        whereClauses.push(`dy.home_type_id IN (${escapedHometypes})`);
       }
       if (propertydescription) {
         const propertyDescArray = propertydescription
           .split(",")
           .map((d) => d.trim());
-        const escapedDescs = propertyDescArray.map((d) => db.escape(d)).join(", ");
-        whereClauses.push(`dpd.id IN (${escapedDescs})`);
+        const escapedDescs = propertyDescArray
+          .map((d) => db.escape(d))
+          .join(", ");
+        whereClauses.push(`dy.prop_desc_id IN (${escapedDescs})`);
       }
-  
+
       const whereCondition =
         whereClauses.length > 0 ? whereClauses.join(" AND ") : "1";
-  
-      // Fetch property data
-      const properties = await this.dbService.getJoinedData(
+
+      // Fetch data using the DatabaseService
+      const results = await this.dbService.getJoinedData(
         tableName,
         joinClauses,
         fieldNames,
         whereCondition
       );
-  
-      const paginatedProperties = properties.slice(
-        offset,
-        offset + sanitizedLimit
-      );
-      const totalRecords = properties.length;
+
+      const paginatedResults = results.slice(offset, offset + sanitizedLimit);
+      const totalRecords = results.length;
       const totalPages = Math.ceil(totalRecords / sanitizedLimit);
-  
-      if (paginatedProperties.length === 0) {
-        return res.status(404).json({
-          error: "No properties found for the given filters or page.",
-        });
-      }
-  
-      // Extract community IDs from properties
-      const communityIds = paginatedProperties.map((p) => p.community_id);
-      const uniqueCommunityIds = [...new Set(communityIds)];
-  
-      // Fetch landmarks for the extracted community IDs
-      const landmarksTable = `dy_landmarks dl`;
-      const landmarksJoinClauses = `
-        LEFT JOIN st_landmarks_category slc ON dl.landmark_category_id = slc.id
-      `;
-      const landmarksFieldNames = `
-        dl.community_id,
-        dl.landmark_name,
-        dl.distance,
-        dl.landmark_category_id,
-        slc.landmark_category
-      `;
-      const landmarksWhereCondition =
-        uniqueCommunityIds.length > 0
-          ? `dl.community_id IN (${uniqueCommunityIds.map((id) =>
-              db.escape(id)
-            )})`
-          : "1";
-  
-      const landmarks = await this.dbService.getJoinedData(
-        landmarksTable,
-        landmarksJoinClauses,
-        landmarksFieldNames,
-        landmarksWhereCondition
-      );
-  
-      // Organize landmarks by community ID
-      const landmarksByCommunity = landmarks.reduce((acc, landmark) => {
-        if (!acc[landmark.community_id]) {
-          acc[landmark.community_id] = [];
-        }
-        acc[landmark.community_id].push(landmark);
-        return acc;
-      }, {});
-  
-      // Remove duplicates and enhance properties
-      const enhancedProperties = paginatedProperties.reduce((acc, property) => {
-        if (!acc.some((p) => p.id === property.id)) {
-          const address = property.address || "";
-          const pincodeMatch = address.match(/\b\d{6}\b/);
-          const pincode = pincodeMatch ? pincodeMatch[0] : null;
-          const pincodeUrl = pincode
-            ? `https://api.postalpincode.in/pincode/${pincode}`
-            : null;
-  
-          acc.push({
-            ...property,
-            pincode,
-            pincode_url: pincodeUrl,
-            landmarks: landmarksByCommunity[property.community_id] || [],
-          });
-        }
-        return acc;
-      }, []);
-  
+
+
+      const enhancedResults = paginatedResults.map((property) => {
+        const address = property.address || "";
+        const pincodeMatch = address.match(/\b\d{6}\b/);
+        const pincode = pincodeMatch ? pincodeMatch[0] : null;
+        const pincodeUrl = pincode
+          ? `https://api.postalpincode.in/pincode/${pincode}`
+          : null;
+
+        return {
+          ...property,
+          pincode,
+          pincode_url: pincodeUrl,
+      
+        };
+      });
+
       res.status(200).json({
-        message: "Property and landmarks fetched successfully.",
+        message: property_id
+          ? `Details for property ID: ${property_id}`
+          : `All property details`,
         pagination: {
           currentPage: sanitizedPage,
           totalPages,
           totalRecords,
           limit: sanitizedLimit,
         },
-        properties: enhancedProperties,
+        results: enhancedResults,
       });
     } catch (error) {
-      console.error("Error fetching property and landmark details:", error);
+      console.error("Error fetching property details:", error.message);
       res.status(500).json({
-        error: "An error occurred while fetching property and landmark details.",
+        error: "An error occurred while fetching property details.",
         details: error.message,
       });
     }
@@ -266,14 +193,7 @@ class PropertyController extends BaseController {
 
 class UserActionsController extends BaseController {
 
-  /**
-   * Fetches user actions based on provided filters.
-   *
-   * @param {Object} req - Express request object containing query parameters.
-   * @param {Object} res - Express response object used to send back the response.
-   *
-   * @returns {Promise<void>} - Sends a response with user action details or an error message.
-   */
+
   async getUserActions(req, res) {
     try {
       const { user_id, property_id, id } = req.query;
@@ -317,22 +237,20 @@ LEFT JOIN
         whereCondition
       );
 
-      // Check if results are empty
-      if (!results || results.length === 0) {
-        return res.status(404).json({
-          error: "No user actions found for the provided filters.",
-        });
-      }
       // Fetch matching properties for the given user_id
 let userProperties = [];
 if (user_id) {
   const mainTable = "dy_transactions dt";
   const joinClauses = `
-    LEFT JOIN dy_user_actions dua ON dua.user_id = dt.user_id
-    LEFT JOIN dy_user u ON dt.rm_id = u.id
-  `;
-  const fields = "dt.prop_id,u.user_name,u.mobile_no";
-  const whereClause = `dua.user_id = ${db.escape(user_id)}`;
+  LEFT JOIN dy_user u ON dt.rm_id = u.id
+  LEFT JOIN dy_property dy ON dt.prop_id = dy.id
+  LEFT JOIN st_current_status sct ON dt.cur_stat_code = sct.id
+
+  ${propertyFields}
+`;
+
+  const fields = `dt.prop_id,sct.status_code,u.user_name,u.mobile_no,${fieldNames1}`;
+  const whereClause = `dt.user_id = ${db.escape(user_id)}`;
 
   // Fetch data using getJoinedData
   userProperties = await this.dbService.getJoinedData(
@@ -341,7 +259,7 @@ if (user_id) {
     fields,
     whereClause
   );
-      // Extract distinct property IDs along with user_name
+
   const uniqueProperties = [];
   const seenProps = new Set();
 
@@ -351,14 +269,43 @@ if (user_id) {
       uniqueProperties.push({
         prop_id: item.prop_id,
         user_name: item.user_name,
-        RM_mobile_no:item.mobile_no
+        RM_mobile_no: item.mobile_no,
+        current_status:item.current_status,
+        id: item.id,
+        propert_current_status: item.current_status,
+        prop_type: item.prop_type,
+        home_type: item.home_type,
+        prop_desc: item.prop_desc,
+        community_name: item.community_name,
+        map_url: item.map_url,
+        total_area: item.total_area,
+        open_area: item.open_area,
+        nblocks: item.nblocks,
+        nfloors_per_block: item.nfloors_per_block,
+        nhouses_per_floor: item.nhouses_per_floor,
+        address: item.address,
+        totflats: item.totflats,
+        default_images: item.default_images,
+        nbeds: item.nbeds,
+        nbaths: item.nbaths,
+        nbalcony: item.nbalcony,
+        eat_pref: item.eat_pref,
+        parking_count: item.parking_count,
+        deposit: item.deposit,
+        maintenance_type: item.maintenance_type,
+        rental_low: item.rental_low,
+        rental_high: item.rental_high,
+        tower_no: item.tower_no,
+        floor_no: item.floor_no,
+        flat_no: item.flat_no,
+        images_location: item.images_location,
+        builder_name: item.builder_name,
+        city_name: item.city_name,
       });
     }
   });
 
   userProperties = uniqueProperties;
-
-
 }
 
 
@@ -380,13 +327,6 @@ if (user_id) {
 
 class TaskController extends BaseController {
 
-  /**
-   * Retrieves tasks based on RM or FM ID.
-   *
-   * @param {Object} req - Express request object.
-   * @param {Object} res - Express response object.
-   * @returns {Promise<void>} - Sends response with task data or error message.
-   */
 
   async getTasks(req, res) {
     try {
@@ -437,11 +377,6 @@ class TaskController extends BaseController {
         whereCondition
       );
 
-      if (!taskResults || taskResults.length === 0) {
-        return res
-          .status(404)
-          .json({ error: "No records found for the provided parameters." });
-      }
 
       // Fetch status data
       const statusCondition = rm_id
@@ -514,17 +449,12 @@ class TaskController extends BaseController {
 
 class updateTask extends BaseController {
 
-  /**
-   * Updates a task based on the provided details.
-   * @param {Object} req - The request object containing the task details.
-   * @param {Object} res - The response object used to send the response.
-   */
+
   async updateTask(req, res) {
     const { id, cur_stat_code, schedule_time, schedule_date, rm_id,fm_id } = req.body;
     console.log("req", req.body);
 
     try {
-      // Step 1: Fetch the current value of `cur_stat_code` for the transaction
       const currentStatus = await this.dbService.getRecordsByFields(
         "dy_transactions",
         "cur_stat_code",
@@ -532,10 +462,9 @@ class updateTask extends BaseController {
       );
 
       const currentStatCode = currentStatus[0]?.cur_stat_code;
-      console.log("currentStatCode", currentStatCode);
 
       // Step 2: If the new `cur_stat_code` is 24, update the `dy_property` table
-      if (currentStatCode == 24) {
+      if (currentStatCode == 20) {
         const transaction = await this.dbService.getRecordsByFields(
           "dy_transactions",
           "prop_id",
@@ -548,7 +477,7 @@ class updateTask extends BaseController {
           // Prepare the request body for updating `dy_property`
           const updatePropertyBody = {
             tbl_name: "dy_property",
-            field_values_pairs: { current_status: currentStatCode },
+            field_values_pairs: { current_status: 24 },
             where_condition: `id = ${db.escape(propId)}`,
           };
 
@@ -608,27 +537,7 @@ class updateTask extends BaseController {
 
 class addNewRecord extends BaseController {
 
-  /**
-   * Adds a new record to the specified table.
-   * This method uses a stored procedure to insert a new record into the database.
-   * It validates the input and constructs the required parameters for the stored procedure call.
-   *
-   * @param {Object} req - Express request object containing the request body.
-   *        The request body must include `tableName`, `fieldNames`, and `fieldValues`.
-   *
-   * @param {Object} res - Express response object used to send back the response.
-   *        The results are returned as JSON with either a success message or an error message.
-   *
-   * @returns {Promise<void>} - The function does not return anything explicitly but sends a response to the client.
-   *
-   * @throws {Error} - If any error occurs during the database operation, it will be caught and returned in the response.
-   *
-   * Example:
-   *
-   * // Example request: POST /api/addNewRecord
-   * // Request body: { "tableName": "dy_rm_fm_com_map", "fieldNames": "community_id, fm_id", "fieldValues": "1, 123" }
-   * // Example response: { message: "Record added successfully.", result: { ... } }
-   */
+
   async addNewRecord(req, res) {
     const { tableName, fieldNames, fieldValues } = req.body; // Extract parameters from the request body
 
@@ -673,25 +582,7 @@ class addNewRecord extends BaseController {
 
 class getRecords extends BaseController {
 
-  /**
-   * Fetches records from the specified table based on given fields and an optional condition.
-   * This method uses a stored procedure to retrieve data from the database.
-   *
-   * @param {Object} req - Express request object containing the query parameters.
-   *        The query parameters must include `tableName` and `fieldNames`, and optionally `whereCondition`.
-   *
-   * @param {Object} res - Express response object used to send back the response.
-   *        The results are returned as JSON with either a success message or an error message.
-   *
-   * @returns {Promise<void>} - The function does not return anything explicitly but sends a response to the client.
-   *
-   * @throws {Error} - If any error occurs during the database operation, it will be caught and returned in the response.
-   *
-   * Example:
-   *
-   * // Example request: GET /api/getRecords?tableName=dy_user&fieldNames=id,user_name&whereCondition=role_id=1
-   * // Example response: { message: "Records retrieved successfully.", result: [...] }
-   */
+
   async getRecords(req, res) {
     const { tableName, fieldNames, whereCondition } = req.query; // Extract parameters from query string
 
@@ -710,12 +601,6 @@ class getRecords extends BaseController {
         whereCondition || "" // Default to an empty string if no condition is provided
       );
 
-      // Check if no records are found
-      if (!results || results.length === 0) {
-        return res
-          .status(404)
-          .json({ error: "No records found for the given query." });
-      }
 
       // Return the results in a successful response
       res.status(200).json({
@@ -735,26 +620,7 @@ class getRecords extends BaseController {
 
 class updateRecord extends BaseController {
 
-  /**
-   * Updates a record in the specified table based on given field-value pairs and an optional condition.
-   * This method uses a stored procedure to update data in the database.
-   *
-   * @param {Object} req - Express request object containing the request body.
-   *        The request body must include `tableName`, `fieldValuePairs`, and optionally `whereCondition`.
-   *
-   * @param {Object} res - Express response object used to send back the response.
-   *        The results are returned as JSON with either a success message or an error message.
-   *
-   * @returns {Promise<void>} - The function does not return anything explicitly but sends a response to the client.
-   *
-   * @throws {Error} - If any error occurs during the database operation, it will be caught and returned in the response.
-   *
-   * Example:
-   *
-   * // Example request: PUT /api/updateRecord
-   * // Request body: { "tableName": "dy_user", "fieldValuePairs": "user_name='John Doe'", "whereCondition": "id=1" }
-   * // Example response: { message: "Record updated successfully.", result: { ... } }
-   */
+
   async updateRecord(req, res) {
     const { tableName, fieldValuePairs, whereCondition } = req.body; // Extract parameters from the request body
 
@@ -773,13 +639,6 @@ class updateRecord extends BaseController {
         whereCondition || "" // Default to an empty string if no condition is provided
       );
 
-      // Check if the update was successful
-      if (!result || result.affectedRows === 0) {
-        return res.status(404).json({
-          error:
-            "No records were updated. Please check the conditions provided.",
-        });
-      }
 
       // Return the result in a successful response
       res.status(200).json({
@@ -799,26 +658,7 @@ class updateRecord extends BaseController {
 
 class deleteRecord extends BaseController {
 
-  /**
-   * Deletes records from the specified table based on an optional condition.
-   * This method uses a stored procedure to delete data from the database.
-   *
-   * @param {Object} req - Express request object containing the request body.
-   *        The request body must include `tableName` and optionally `whereCondition`.
-   *
-   * @param {Object} res - Express response object used to send back the response.
-   *        The results are returned as JSON with either a success message or an error message.
-   *
-   * @returns {Promise<void>} - The function does not return anything explicitly but sends a response to the client.
-   *
-   * @throws {Error} - If any error occurs during the database operation, it will be caught and returned in the response.
-   *
-   * Example:
-   *
-   * // Example request: DELETE /api/deleteRecord
-   * // Request body: { "tableName": "dy_user", "whereCondition": "id=1" }
-   * // Example response: { message: "Record(s) deleted successfully.", result: { ... } }
-   */
+
   async deleteRecord(req, res) {
     const { tableName, whereCondition } = req.body;
 
@@ -847,14 +687,6 @@ class deleteRecord extends BaseController {
         whereCondition || ""
       );
 
-      // Assuming result contains the number of affected rows directly
-      if (!result || result.affectedRows == 0) {
-        return res.status(404).json({
-          error:
-            "No records were deleted. Please check the conditions provided.",
-          details: { tableName, whereCondition },
-        });
-      }
 
       res.status(200).json({
         message: "Record(s) deleted successfully.",
@@ -871,15 +703,9 @@ class deleteRecord extends BaseController {
 
 class addRmTask extends BaseController {
 
-  /**
-   * Assigns a Relationship Manager (RM) to a transaction.
-   * Implements the logic to determine the optimal RM without using a specific stored procedure.
-   * @param {Object} req - Express request object containing user_id and property_id in the body.
-   * @param {Object} res - Express response object for sending responses.
-   */
 
   async addRmTask(req, res) {
-    const { user_id, property_id } = req.body; // Extract user_id and property_id from the request body
+    const { user_id, property_id,cur_stat_code } = req.body; // Extract user_id and property_id from the request body
     console.log("req", req.body);
 
     // Validate the input: Ensure both user_id and property_id are provided
@@ -898,9 +724,6 @@ class addRmTask extends BaseController {
       );
       console.log("2", properties);
 
-      if (!properties || properties.length === 0) {
-        return res.status(404).json({ error: "Property not found." });
-      }
 
       const community_id = properties[0].community_id;
       console.log("3", community_id);
@@ -950,11 +773,6 @@ class addRmTask extends BaseController {
         );
         console.log("Filtered RM Results:", validRmResults);
 
-        if (!validRmResults || validRmResults.length === 0) {
-          return res
-            .status(404)
-            .json({ error: "No valid Relationship Managers found." });
-        }
 
         // Sort the results by the transaction count (Agg_Res)
         rm_id = validRmResults.sort((a, b) => a.Agg_Res - b.Agg_Res)[0].rm_id;
@@ -962,7 +780,7 @@ class addRmTask extends BaseController {
 
         // Step 3: Insert the new transaction into dy_transactions
         const insertFields = "user_id, prop_id, rm_id, cur_stat_code";
-        const insertValues = `${user_id}, ${property_id}, ${rm_id}, 1`; // Convert array to comma-separated string
+        const insertValues = `${user_id}, ${property_id}, ${rm_id}, ${cur_stat_code}`; // Convert array to comma-separated string
         console.log("6", insertFields, insertValues);
 
         await this.dbService.addNewRecord(
@@ -994,13 +812,7 @@ class addRmTask extends BaseController {
 
 class getPropertyAndRequestStats extends BaseController {
 
-  /**
-   * Fetches total properties, pending properties, total requests, and total communities.
-   *
-   * @param {Object} req - Express request object.
-   * @param {Object} res - Express response object.
-   * @returns {Promise<void>} - The function sends the response with the calculated totals.
-   */
+
   async getPropertyAndRequestStats(req, res) {
     try {
       // Query for total properties (current_status = 3) using getAggregateValue
@@ -1059,24 +871,6 @@ class getPropertyAndRequestStats extends BaseController {
 }
 
 class getTopCommunities extends BaseController {
-
-  /**
-   * Fetches the top 4 community names based on transaction count.
-   * This method retrieves the top communities by joining the 'dy_transactions', 'dy_property', and 'st_community' tables.
-   * It groups by community ID and sorts by transaction count in descending order, limiting the results to 4.
-   *
-   * @param {Object} req - Express request object (not used in this method but included for consistency).
-   * @param {Object} res - Express response object used to send back the response.
-   *
-   * @returns {Promise<void>} - Sends a JSON response containing the top 4 communities or an error message.
-   *
-   * @throws {Error} - If any error occurs during the database operation, it will be caught and returned in the response.
-   *
-   * Example:
-   *
-   * // Example request: GET /api/getTopCommunities
-   * // Example response: { message: "Retrieved successfully.", result: [...] }
-   */
 
 
   async getTopCommunities(req, res) {
@@ -1139,23 +933,7 @@ INNER JOIN st_community ON p.community_id = st_community.id
 
 class UserProfile extends BaseController {
 
-  /**
-   * Fetches user profile information along with user details.
-   * This method retrieves data from `dy_user_profile` and joins it with `dy_user` using the `user_id` field.
-   *
-   * @param {Object} req - Express request object containing the query parameters.
-   *        The user_id is extracted from `req.query` to filter the results.
-   *
-   * @param {Object} res - Express response object used to send back the response.
-   *        The results are returned as JSON with either a success message or an error message.
-   *
-   * @returns {Promise<void>} - The function does not return anything explicitly but sends a response to the client.
-   *
-   * Example:
-   *
-   * // Example request: GET /api/getUserProfile?user_id=123
-   * // Example response: { message: "Retrieved successfully.", result: [...] }
-   */
+
   async getUserProfile(req, res) {
     const { user_id } = req.query; // Extract user_id from query parameters
 
@@ -1195,12 +973,6 @@ class UserProfile extends BaseController {
         whereCondition
       );
 
-      // Check if no records are found
-      if (!results || results.length === 0) {
-        return res
-          .status(404)
-          .json({ error: "No records found for the provided user_id." });
-      }
       const conv_mode = await this.dbService.getRecordsByFields(
         "st_conv_mode",
         "id, conv_mode"
@@ -1231,33 +1003,7 @@ class UserProfile extends BaseController {
 
 class UserController extends BaseController {
 
-  /**
-   * Fetches all RMs (Role ID = 3) and FMs (Role ID = 4) from the dy_user table.
-   * RMs are listed first, followed by FMs.
-   *
-   * @param {Object} req - Express request object (no query parameters needed).
-   * @param {Object} res - Express response object used to send the response.
-   *
-   * @returns {Promise<void>} - Sends a response with the grouped list of RMs and FMs.
-   *
-   * Example:
-   *
-   * // Example request: GET /api/getUsersByRoleGrouped
-   * // Example response:
-   * // {
-   * //   "message": "Users retrieved successfully.",
-   * //   "result": {
-   * //     "RMs": [
-   * //       { "user_name": "John Doe", "role_id": 3 },
-   * //       { "user_name": "Alice", "role_id": 3 }
-   * //     ],
-   * //     "FMs": [
-   * //       { "user_name": "Jane Smith", "role_id": 4 },
-   * //       { "user_name": "Bob", "role_id": 4 }
-   * //     ]
-   * //   }
-   * // }
-   */
+
   async getUsersByRole(req, res) {
     try {
       // Define the table and fields to fetch
@@ -1280,15 +1026,6 @@ class UserController extends BaseController {
         fmCondition
       );
 
-      // Check if no records are found
-      if (
-        (!rmResults || rmResults.length === 0) &&
-        (!fmResults || fmResults.length === 0)
-      ) {
-        return res
-          .status(404)
-          .json({ error: "No RMs or FMs found in the database." });
-      }
 
       // Return the results in a grouped response
       res.status(200).json({
@@ -1309,7 +1046,107 @@ class UserController extends BaseController {
   }
 }
 
+class LandMarksController extends BaseController {
 
+  async landMarks(req, res) {
+    const { community_id } = req.query; // Extract community_id from query parameters
+
+    try {
+      // Define the main table and its alias for the query
+      const tableName = `dy_landmarks dl`; // Main table alias
+
+      // Define the JOIN clauses to link the main table with other tables
+      const joinClauses = `      LEFT JOIN st_landmarks_category slc ON dl.landmark_category_id = slc.id
+`;
+      const fieldNames = `   dl.landmark_name AS landmark_name,
+        dl.distance AS distance,
+        dl.landmark_category_id AS landmark_category_id,
+        slc.landmark_category AS landmark_category
+
+`;
+
+      // If community_id is provided, escape it to prevent SQL injection
+      const whereCondition = community_id
+        ? `dl.community_id = ${db.escape(community_id)}` // Escape community_id to avoid SQL injection
+        : "";
+
+      // Fetch the data using the DatabaseService
+      const results = await this.dbService.getJoinedData(
+        tableName,
+        joinClauses,
+        fieldNames,
+        whereCondition
+      );
+
+
+      // Return the results in a successful response
+      res.status(200).json({
+        message: "Retrieved successfully.",
+        result: results, // List of Facility Managers for the given community_id
+      });
+    } catch (error) {
+      // Log and return any errors that occur during the process
+      console.error("Error fetching FM status data:", error.message);
+      res.status(500).json({
+        error: "An error occurred while fetching FM status data.",
+        details: error.message, // Provide the error details for debugging
+      });
+    }
+  }
+}
+
+
+class CityBasedCommunitiesController extends BaseController {
+
+
+  async CityBasedCommunities(req, res) {
+    const { city_id} = req.query; // Extract city_id from query parameters
+
+    try {
+      if (!city_id) {
+        return res.status(400).json({
+          error: "city_id is required to fetch communities.",
+        });
+      }
+
+      // Define the main table and its alias for the query
+      const tableName = `st_community sc`; // Main table alias
+
+      // Define the JOIN clauses to link the main table with the builder table
+      const joinClauses = `LEFT JOIN st_builder sb ON sc.builder_id = sb.id`;
+
+      // Define the fields to select from the database
+      const fieldNames = `
+        sc.id AS community_id,
+        sc.name AS community_name
+      `;
+
+      // Define the WHERE condition to filter by city_id
+      const whereCondition = `sb.city_id = ${db.escape(city_id)} AND sc.rstatus = 1 AND sb.rstatus = 1`;
+
+      // Fetch the data using the DatabaseService
+      const results = await this.dbService.getJoinedData(
+        tableName,
+        joinClauses,
+        fieldNames,
+        whereCondition
+      );
+
+      // Return the results in a successful response
+      res.status(200).json({
+        message: "Retrieved successfully.",
+        result: results, // List of communities for the given city_id
+      });
+    } catch (error) {
+      // Log and return any errors that occur during the process
+      console.error("Error fetching communities data:", error.message);
+      res.status(500).json({
+        error: "An error occurred while fetching communities data.",
+        details: error.message, // Provide the error details for debugging
+      });
+    }
+  }
+}
 
 module.exports = {
   UserActionsController,
@@ -1326,4 +1163,7 @@ module.exports = {
   getTopCommunities,
   UserProfile,
   UserController,
+  LandMarksController,
+  CityBasedCommunitiesController
+
 };
