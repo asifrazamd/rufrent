@@ -1,13 +1,13 @@
 const DatabaseService = require('../utils/service');
 const AdminManager = require('../utils/admin'); 
-const PaymentService= require('../utils/paymentService');
+const RazorpayService = require("../config/razor"); // Already initialized singleton
 
 
 class BaseController {
     constructor() {
       this.dbService = new DatabaseService();
       this.tableManager = new AdminManager(); 
-      this.paymentService= new PaymentService();
+      this.razorpay = RazorpayService.getInstance(); // Use Singleton Instance
 
     }
   

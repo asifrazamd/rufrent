@@ -4,7 +4,7 @@ require('dotenv').config();
 
 const express = require('express');
 const { UserActionsController, PropertyController, FMController,TaskController,addNewRecord,getRecords,updateRecord,deleteRecord,addRmTask,updateTask,getPropertyAndRequestStats,getTopCommunities,UserProfile,UserController,  LandMarksController,
-    CityBasedCommunitiesController
+    CityBasedCommunitiesController,AmenitiesController,AddCommunitiesController
   } = require('../controllers/tableControllers');
 
 
@@ -29,6 +29,10 @@ const userprofileController=new UserProfile();
 const userController=new UserController();
 const landmarksController=new LandMarksController();
 const cityBasedCommunitiesController=new CityBasedCommunitiesController();
+const allAmenitiesController=new AmenitiesController();
+const addCommunitiesController=new AddCommunitiesController();
+
+
 
 
 
@@ -67,6 +71,15 @@ router.get('/getTopCommunities',(req,res)=> getTopCommunitiesController.getTopCo
 router.get('/roles',(req,res)=> userController.getUsersByRole(req,res));
 router.get('/landmarks',(req,res)=>landmarksController.landMarks(req,res));
 router.get('/CityBasedCommunities',(req,res)=> cityBasedCommunitiesController.CityBasedCommunities(req,res));
+router.post('/addcommunities',(req,res)=>addCommunitiesController.addcommunities(req,res));
+
+router.get("/amenities", (req, res) => {
+  allAmenitiesController.getAmenities(req, res);
+});
+router.post("/addamenities", (req, res) => {
+  allAmenitiesController.addAmenities(req, res);
+});
+
 
 
 

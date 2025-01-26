@@ -64,9 +64,6 @@ class FMController extends BaseController {
 }
 
 class PropertyController extends BaseController {
-
-
-
   async showPropDetails(req, res) {
     try {
       const {
@@ -150,22 +147,32 @@ class PropertyController extends BaseController {
       const totalRecords = results.length;
       const totalPages = Math.ceil(totalRecords / sanitizedLimit);
 
+      // Enhance results with pincode information
+      const enhancedResults = await Promise.all(
+        paginatedResults.map(async (property) => {
+          const address = property.address || "";
+          const pincodeMatch = address.match(/\b\d{6}\b/);
+          const pincode = pincodeMatch ? pincodeMatch[0] : null;
+          const pincodeUrl = pincode
+            ? `https://api.postalpincode.in/pincode/${pincode}`
+            : null;
 
-      const enhancedResults = paginatedResults.map((property) => {
-        const address = property.address || "";
-        const pincodeMatch = address.match(/\b\d{6}\b/);
-        const pincode = pincodeMatch ? pincodeMatch[0] : null;
-        const pincodeUrl = pincode
-          ? `https://api.postalpincode.in/pincode/${pincode}`
-          : null;
+          // Fetch amenities for each property
+          const amenities = await this.getAmenities({ community_id: property.community_id });
 
-        return {
-          ...property,
-          pincode,
-          pincode_url: pincodeUrl,
-      
-        };
-      });
+
+          const landmarks = await this.landMarks({ community_id: property.community_id });
+
+
+          return {
+            ...property,
+            pincode,
+            pincode_url: pincodeUrl,
+            amenities,
+            landmarks
+          };
+        })
+      );
 
       res.status(200).json({
         message: property_id
@@ -185,6 +192,89 @@ class PropertyController extends BaseController {
         error: "An error occurred while fetching property details.",
         details: error.message,
       });
+    }
+  }
+
+  async getAmenities({ community_id }) {
+    try {
+      const tableName = `st_amenity_category ac`;
+  
+      const joinClauses = `
+        LEFT JOIN rufrent.st_amenities sa ON ac.id = sa.amenity_category_id AND sa.rstatus = 1
+        LEFT JOIN rufrent.dy_amenities ma ON ma.amenity = sa.id
+        LEFT JOIN rufrent.st_community ka ON ka.id = ma.community AND ka.rstatus = 1
+      `;
+  
+      const fieldNames = `
+        ka.name AS community_name,
+        GROUP_CONCAT(DISTINCT sa.amenity_name) AS amenities,
+        ac.amenity_category AS category
+      `;
+  
+      const whereCondition = `
+        ka.id = ${db.escape(community_id)} AND ka.name IS NOT NULL
+      `;
+  
+      const groupByClause = `
+        GROUP BY ka.name, ac.amenity_category
+      `;
+  
+      const results = await this.dbService.getJoinedData(
+        tableName,
+        joinClauses,
+        fieldNames,
+        `${whereCondition} ${groupByClause}`
+      );
+  
+      // Transform amenities from comma-separated string to an array
+      return results.map(row => ({
+        ...row,
+        amenities: row.amenities ? row.amenities.split(',') : []
+      }));
+    } catch (error) {
+      console.error("Error fetching amenities:", error.message);
+      throw new Error("Failed to fetch amenities.");
+    }
+  }
+  
+
+  async landMarks({ community_id }) {
+    try {
+      const tableName = `dy_landmarks dl`;
+  
+      const joinClauses = `
+        LEFT JOIN st_landmarks_category slc ON dl.landmark_category_id = slc.id
+      `;
+  
+      const fieldNames = `
+        dl.community_id AS community_id,
+        GROUP_CONCAT(DISTINCT dl.landmark_name) AS landmarks,
+        slc.landmark_category AS category
+      `;
+  
+      const whereCondition = `
+        dl.community_id = ${db.escape(community_id)}
+      `;
+  
+      const groupByClause = `
+        GROUP BY dl.community_id, slc.landmark_category
+      `;
+  
+      const results = await this.dbService.getJoinedData(
+        tableName,
+        joinClauses,
+        fieldNames,
+        `${whereCondition} ${groupByClause}`
+      );
+  
+      // Transform landmarks from comma-separated string to an array
+      return results.map(row => ({
+        ...row,
+        landmarks: row.landmarks ? row.landmarks.split(',') : []
+      }));
+    } catch (error) {
+      console.error("Error fetching landmarks:", error.message);
+      throw new Error("Failed to fetch landmarks.");
     }
   }
   
@@ -249,7 +339,7 @@ if (user_id) {
   ${propertyFields}
 `;
 
-  const fields = `dt.prop_id,sct.status_code,u.user_name,u.mobile_no,${fieldNames1}`;
+  const fields = `dt.prop_id,sct.status_code,dt.tr_st_time,u.user_name,u.mobile_no,${fieldNames1}`;
   const whereClause = `dt.user_id = ${db.escape(user_id)}`;
 
   // Fetch data using getJoinedData
@@ -268,9 +358,10 @@ if (user_id) {
       seenProps.add(item.prop_id);
       uniqueProperties.push({
         prop_id: item.prop_id,
+        property_added_at: item.tr_st_time,
         user_name: item.user_name,
         RM_mobile_no: item.mobile_no,
-        current_status:item.current_status,
+        current_status:item.status_code,
         id: item.id,
         propert_current_status: item.current_status,
         prop_type: item.prop_type,
@@ -1148,6 +1239,279 @@ class CityBasedCommunitiesController extends BaseController {
   }
 }
 
+class AmenitiesController extends BaseController {
+  async getAmenities(req, res) {
+    try {
+      const tableName = `st_amenity_category ac`;
+
+      const joinClauses = `
+        LEFT JOIN rufrent.st_amenities sa ON ac.id = sa.amenity_category_id AND sa.rstatus = 1
+        LEFT JOIN rufrent.dy_amenities ma ON ma.amenity = sa.id
+        LEFT JOIN rufrent.st_community ka ON ka.id = ma.community AND ka.rstatus = 1
+      `;
+
+      // Ensure we use the correct columns and DISTINCT for amenities
+      const fieldNames = `
+        ka.name AS community_name,
+        GROUP_CONCAT(DISTINCT sa.amenity_name) AS amenities,
+        ac.amenity_category AS category
+      `;
+
+      const whereCondition = `
+        ka.name IS NOT NULL
+      `;
+
+      const groupByClause = `
+        GROUP BY ka.name, ac.amenity_category
+      `;
+
+      // Fetch data using the DatabaseService
+      const results = await this.dbService.getJoinedData(
+        tableName,
+        joinClauses,
+        fieldNames,
+        `${whereCondition} ${groupByClause}`
+      );
+
+      if (!results.length) {
+        return res.status(404).json({
+          message: "No amenities found.",
+          data: [],
+        });
+      }
+
+      res.status(200).json({
+        message: "Amenities retrieved successfully.",
+        data: results,
+      });
+    } catch (error) {
+      console.error("Error fetching amenities:", error.message);
+      res.status(500).json({
+        error: "An error occurred while fetching amenities.",
+        details: error.message,
+      });
+    }
+  }
+
+  async addAmenities(req, res) {
+    const { community_id, amenity_ids } = req.body; // Extract community_id and amenity_ids from the request body
+
+    // Validate input
+    if (!community_id || !Array.isArray(amenity_ids) || amenity_ids.length === 0) {
+      return res.status(400).json({
+        error: "Invalid input. Provide a community_id and a non-empty array of amenity_ids.",
+      });
+    }
+
+    try {
+      const tableName = "dy_amenities"; // Target table
+      const fieldNames = "amenity, community"; // Fields to insert
+
+      // Store any errors during insertion
+      const errors = [];
+
+      // Insert each amenity for the given community_id
+      for (const amenity_id of amenity_ids) {
+        try {
+          // Create field values for the stored procedure
+          const fieldValues = `${amenity_id}, ${community_id}`;
+
+          // Call the helper method to add a new record
+          // await this.addNewRecord(tableName, fieldNames, fieldValues);
+          await this.dbService.addNewRecord(
+            tableName,
+            fieldNames,
+            fieldValues
+          );
+        } catch (error) {
+          console.error(
+            `Failed to add amenity_id ${amenity_id} for community_id ${community_id}:`,
+            error.message
+          );
+          errors.push({ amenity_id, error: error.message });
+        }
+      }
+
+      // Check for errors and send an appropriate response
+      if (errors.length > 0) {
+        return res.status(207).json({
+          message: "Some amenities were not added successfully.",
+          errors,
+        });
+      }
+
+      // If all amenities are added successfully, send a success response
+      res.status(200).json({
+        message: "All amenities added successfully to the community.",
+      });
+    } catch (error) {
+      // Log and handle unexpected errors
+      console.error("Error inserting amenities:", error.message);
+      res.status(500).json({
+        error: "An unexpected error occurred while adding amenities.",
+        details: error.message,
+      });
+    }
+  }
+
+
+}
+
+
+class AddCommunitiesController extends BaseController {
+  async addcommunities(req, res) {
+    const {
+      name,
+      map_url,
+      total_area,
+      open_area,
+      nblocks,
+      nfloors_per_block,
+      nhouses_per_floor,
+      address,
+      major_area,
+      builder_id,
+      totflats,
+      status,
+      default_images,
+      rstatus,
+      amenities,
+      landmarks,
+    } = req.body;
+
+    // Validate required fields
+    if (
+      !name ||
+      !map_url ||
+      !total_area ||
+      !open_area ||
+      !nblocks ||
+      !nfloors_per_block ||
+      !nhouses_per_floor ||
+      !address ||
+      !major_area ||
+      !builder_id ||
+      !totflats ||
+      !status ||
+      !default_images ||
+      !rstatus
+    ) {
+      return res.status(400).json({
+        error: 'All required fields must be provided.',
+      });
+    }
+
+    try {
+      const tableName = 'st_community';
+      const fieldNames = [
+        'name',
+        'map_url',
+        'total_area',
+        'open_area',
+        'nblocks',
+        'nfloors_per_block',
+        'nhouses_per_floor',
+        'address',
+        'major_area',
+        'builder_id',
+        'totflats',
+        'status',
+        'default_images',
+        'rstatus',
+      ];
+
+      const fieldValues = [
+        name,
+        map_url,
+        total_area,
+        open_area,
+        nblocks,
+        nfloors_per_block,
+        nhouses_per_floor,
+        address,
+        major_area,
+        builder_id,
+        totflats,
+        status,
+        default_images,
+        rstatus,
+      ];
+
+      // Step 1: Insert the community record
+      const insertFields = fieldNames.join(', ');
+      const insertValues = fieldValues.map((value) => db.escape(value)).join(', ');
+
+
+      const communityResult = await this.dbService.addNewRecord(tableName, insertFields, insertValues);
+
+
+      // Ensure that insertId exists and is valid
+      if (communityResult && communityResult[0] && communityResult[0].insertId) {
+        const communityId = communityResult[0].insertId; // Get the inserted community ID
+
+        // Step 2: Add amenities records (if any)
+        if (amenities && Array.isArray(amenities)) {
+          for (const amenity of amenities) {
+            const amenityTable = 'dy_amenities';
+            const amenityFields = ['amenity', 'community'];
+            const amenityValues = [amenity, communityId];
+            const amenityInsertFields = amenityFields.join(', ');
+            const amenityInsertValues = amenityValues.map((value) => db.escape(value)).join(', ');
+
+
+            await this.dbService.addNewRecord(amenityTable, amenityInsertFields, amenityInsertValues);
+          }
+        }
+
+        // Step 3: Add landmarks records (if any)
+        if (landmarks && Array.isArray(landmarks)) {
+          for (const landmark of landmarks) {
+            const landmarkTable = 'dy_landmarks';
+            const landmarkFields = ['landmark_name', 'distance', 'landmark_category_id', 'community_id'];
+            const landmarkValues = [
+              landmark.landmark_name,
+              landmark.distance,
+              landmark.landmark_category_id,
+              communityId,
+            ];
+            const landmarkInsertFields = landmarkFields.join(', ');
+            const landmarkInsertValues = landmarkValues.map((value) => db.escape(value)).join(', ');
+
+
+            await this.dbService.addNewRecord(landmarkTable, landmarkInsertFields, landmarkInsertValues);
+          }
+        }
+
+        // Send success response
+        res.status(200).json({
+          message: 'Community, amenities, and landmarks added successfully.',
+        });
+      } else {
+        // Log the error if insertId is missing
+        console.error('Failed to insert community record:', communityResult);
+        res.status(500).json({
+          error: 'An error occurred while inserting the community record.',
+          details: 'No insertId returned from the database.',
+        });
+      }
+    } catch (error) {
+      // Log error details and send error response
+      console.error('Error adding community:', error.message);
+      res.status(500).json({
+        error: 'An error occurred while adding the community, amenities, and landmarks.',
+        details: error.message,
+      });
+    }
+  }
+
+  
+  
+  
+  
+  
+  
+}
+
 module.exports = {
   UserActionsController,
   PropertyController,
@@ -1164,6 +1528,9 @@ module.exports = {
   UserProfile,
   UserController,
   LandMarksController,
-  CityBasedCommunitiesController
+  CityBasedCommunitiesController,
+  AmenitiesController,
+  AddCommunitiesController
+
 
 };
