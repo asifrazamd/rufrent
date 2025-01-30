@@ -52,7 +52,6 @@ const joins = {
         scity.name AS city_name,
         dy.rec_add_time AS property_added_at
 
-
     `,
 };
 

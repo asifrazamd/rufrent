@@ -20,9 +20,6 @@ class DatabaseService {
       throw error;
     }
   }
-  
-  
-  
 
   async getRecordsByFields(tableName, fieldNames, whereCondition = '') {
     try {
@@ -83,7 +80,6 @@ class DatabaseService {
     }
   }
 
-
     
   async getJoinedData(mainTable, joinClauses, fields, whereClause = '') {
     
@@ -110,9 +106,6 @@ class DatabaseService {
     }
   }
 
-
-
-
    async getGroupedData(tableName, groupField, aggregateField, aggregateFunction, whereCondition = '') {
     try {
 
@@ -137,7 +130,6 @@ class DatabaseService {
     }
 }
 
-  
 
   async getAggregateValue(tableName, fieldName, aggregateFunction, whereCondition = '') {
     try {
@@ -180,22 +172,6 @@ class DatabaseService {
     }
   }
 
-
-  async executeRawQuery(query) {
-    try {
-      // Execute the raw SQL query
-      const [rows] = await db.execute(query);
-      return rows;
-    } catch (error) {
-      console.error('Error executing raw query:', error.message);
-      throw error;
-    }
-  }
-
-
 }
-
-
-
 
 module.exports = DatabaseService;

@@ -1,4 +1,3 @@
-const authenticate = require('../middleware/authenticate');
 require('dotenv').config();
 
 

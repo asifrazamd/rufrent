@@ -1,7 +1,6 @@
 const DatabaseService = require("../utils/service"); // Correct import path
 const db = require("../config/db"); // Database connection object
 const { propertyFields, fieldNames1 } = require("../utils/joins");
-const authenticate = require("../middleware/authenticate");
 require("dotenv").config();
 const BaseController = require("../utils/baseClass"); // Adjust the path as needed
 
@@ -1141,6 +1140,79 @@ class UserController extends BaseController {
 
 class LandMarksController extends BaseController {
 
+  async addLandmarks(req, res) {
+    const { community_id, landmarks } = req.body;
+
+    if (!community_id || !Array.isArray(landmarks) || landmarks.length === 0) {
+      return res.status(400).json({
+        error:
+          "Invalid input. Please provide a community_id and a list of landmarks.",
+      });
+    }
+
+    try {
+      const tableName = "dy_landmarks"; // Target table
+      const fieldNames =
+        "landmark_name, `distance`, landmark_category_id, community_id"; // Fields to insert
+
+      const errors = []; // Store any errors during insertion
+
+      for (const landmark of landmarks) {
+        const { landmark_name, distance, landmark_category_id } = landmark;
+
+        // Validate landmark fields
+        if (!landmark_name || distance == null || !landmark_category_id) {
+          errors.push({
+            landmark_name,
+            distance,
+            landmark_category_id,
+            error:
+              "Invalid landmark data. Ensure all required fields are provided.",
+          });
+          continue;
+        }
+
+        try {
+          // Format the fieldValues as a comma-separated string
+          const fieldValues = `'${landmark_name}', ${distance}, ${landmark_category_id}, ${community_id}`;
+
+          // Call the addNewRecord method
+          await this.dbService.addNewRecord(tableName, fieldNames, fieldValues);
+        } catch (error) {
+          console.error(
+            `Failed to add landmark "${landmark_name}" for community_id ${community_id}:`,
+            error.message
+          );
+          errors.push({
+            landmark_name,
+            distance,
+            landmark_category_id,
+            error: error.message,
+          });
+        }
+      }
+
+      // Check for errors and send an appropriate response
+      if (errors.length > 0) {
+        return res.status(207).json({
+          message: "Some landmarks were not added successfully.",
+          errors,
+        });
+      }
+
+      // If all landmarks are added successfully, send a success response
+      res.status(200).json({
+        message: "All landmarks added successfully to the community.",
+      });
+    } catch (error) {
+      console.error("Error adding landmarks:", error.message);
+      res.status(500).json({
+        error: "An unexpected error occurred while adding landmarks.",
+        details: error.message,
+      });
+    }
+  }
+
   async landMarks(req, res) {
     const { community_id } = req.query; // Extract community_id from query parameters
 
@@ -1151,12 +1223,13 @@ class LandMarksController extends BaseController {
       // Define the JOIN clauses to link the main table with other tables
       const joinClauses = `      LEFT JOIN st_landmarks_category slc ON dl.landmark_category_id = slc.id
 `;
+      // Define the fields to select from the database
       const fieldNames = `   dl.landmark_name AS landmark_name,
         dl.distance AS distance,
         dl.landmark_category_id AS landmark_category_id,
         slc.landmark_category AS landmark_category
 
-`;
+`; // Fields to select
 
       // If community_id is provided, escape it to prevent SQL injection
       const whereCondition = community_id
@@ -1171,6 +1244,12 @@ class LandMarksController extends BaseController {
         whereCondition
       );
 
+      // Check if no records are found
+      if (!results || results.length === 0) {
+        return res
+          .status(404)
+          .json({ error: "No records found for the provided community_id." });
+      }
 
       // Return the results in a successful response
       res.status(200).json({
@@ -1186,6 +1265,97 @@ class LandMarksController extends BaseController {
       });
     }
   }
+
+  async importLandmarks(req, res) {
+    const { source_community_id, target_community_id } = req.query;
+  
+    try {
+      // Validate the required parameters
+      if (!source_community_id || !target_community_id) {
+        return res.status(400).json({
+          error: "Both source_community_id and target_community_id are required.",
+        });
+      }
+  
+      // Fetch all landmarks associated with the source community ID
+      const whereCondition = `community_id = ${db.escape(source_community_id)}`;
+      const landmarks = await this.dbService.getRecordsByFields(
+        "dy_landmarks",
+        "landmark_name, distance, landmark_category_id",
+        whereCondition
+      );
+  
+      if (landmarks.length === 0) {
+        return res.status(404).json({
+          message: "No landmarks found for the provided source_community_id.",
+        });
+      }
+  
+      // Track which landmarks were added and which were already present
+      const addedLandmarks = [];
+      const existingLandmarks = [];
+  
+      // Insert each landmark into the dy_landmarks table for the target community ID
+      const insertPromises = landmarks.map(async (landmark) => {
+        // Check if the landmark already exists for the target community
+        const whereCondition = `landmark_name = ${db.escape(
+          landmark.landmark_name
+        )} AND community_id = ${db.escape(target_community_id)}`;
+        const existingLandmark = await this.dbService.getRecordsByFields(
+          "dy_landmarks",
+          "id",
+          whereCondition
+        );
+  
+        if (existingLandmark.length === 0) {
+          // If it doesn't exist, insert the landmark
+          const insertData = {
+            landmark_name: landmark.landmark_name,
+            distance: landmark.distance,
+            landmark_category_id: landmark.landmark_category_id,
+            community_id: target_community_id,
+          };
+  
+          await this.dbService.addNewRecord(
+            "dy_landmarks",
+            Object.keys(insertData).join(", "),
+            Object.values(insertData)
+              .map((value) => db.escape(value))
+              .join(", ")
+          );
+          addedLandmarks.push(landmark.landmark_name); // Track added landmark
+        } else {
+          existingLandmarks.push(landmark.landmark_name); // Track existing landmark
+        }
+      });
+  
+      // Wait for all insert operations to complete
+      await Promise.all(insertPromises);
+  
+      // Return a detailed success response
+      let message = "Landmarks import process completed.";
+      if (addedLandmarks.length > 0) {
+        message += ` Added: ${addedLandmarks.join(", ")}.`;
+      }
+      if (existingLandmarks.length > 0) {
+        message += ` Already present: ${existingLandmarks.join(", ")}.`;
+      }
+  
+      res.status(200).json({
+        message,
+        added_landmarks: addedLandmarks.length,
+        existing_landmarks: existingLandmarks.length,
+      });
+    } catch (error) {
+      // Log and return any errors that occur during the process
+      console.error("Error cloning landmarks:", error.message);
+      res.status(500).json({
+        error: "An error occurred while cloning landmarks.",
+        details: error.message, // Provide the error details for debugging
+      });
+    }
+  }
+  
 }
 
 
@@ -1242,276 +1412,190 @@ class CityBasedCommunitiesController extends BaseController {
 }
 
 class AmenitiesController extends BaseController {
-  async getAmenities(req, res) {
+  
+  
+  async addAmenities(req, res) {
+    const { community_id, amenity_ids } = req.body; // Extract community_id and amenity_ids from request body
+
     try {
-      const tableName = `st_amenity_category ac`;
+      // Validate the input
+      if (!community_id || !Array.isArray(amenity_ids) || amenity_ids.length === 0) {
+        return res.status(400).json({
+          error: "Invalid input. Provide a valid community ID and an array of amenity IDs.",
+        });
+      }
 
+      // Define the table name
+      const tableName = "dy_amenities";
+
+      // Loop through each amenity ID and insert it into the database
+      for (const amenityId of amenity_ids) {
+        const fieldNames = `amenity, community`; // Fields to insert
+        const fieldValues = `${db.escape(amenityId)}, ${db.escape(community_id)}`; // Escaped values
+
+        // Use the DatabaseService to insert each record
+        await this.dbService.addNewRecord(tableName, fieldNames, fieldValues);
+      }
+
+      // Return a success response
+      res.status(200).json({
+        message: "Amenities added successfully.",
+      });
+    } catch (error) {
+      // Handle and log any errors
+      console.error("Error adding amenities:", error.message);
+      res.status(500).json({
+        error: "An error occurred while adding amenities.",
+        details: error.message,
+      });
+    }
+  }
+
+  async getAmenities(req, res) {
+    const { community_id } = req.query; // Extract community_id from query parameters
+
+    try {
+      if (!community_id) {
+        return res.status(400).json({
+          error: "community_id is required to fetch amenities.",
+        });
+      }
+
+      // Define the main table and its alias for the query
+      const tableName = `dy_amenities a`; // Main table alias
+
+      // Define the JOIN clauses to link the main table with other tables
       const joinClauses = `
-        LEFT JOIN rufrent.st_amenities sa ON ac.id = sa.amenity_category_id AND sa.rstatus = 1
-        LEFT JOIN rufrent.dy_amenities ma ON ma.amenity = sa.id
-        LEFT JOIN rufrent.st_community ka ON ka.id = ma.community AND ka.rstatus = 1
+        LEFT JOIN st_amenities sa ON a.amenity = sa.id
+        LEFT JOIN st_amenity_category sac ON sa.amenity_category_id = sac.id
       `;
 
-      // Ensure we use the correct columns and DISTINCT for amenities
+      // Define the fields to select from the database
       const fieldNames = `
-        ka.name AS community_name,
-        GROUP_CONCAT(DISTINCT sa.amenity_name) AS amenities,
-        ac.amenity_category AS category
+        a.id AS amenity_mapping_id,
+        a.community AS community_id,
+        sa.id AS amenity_id,
+        sa.amenity_name,
+        sac.id AS amenity_category_id,
+        sac.amenity_category
       `;
 
-      const whereCondition = `
-        ka.name IS NOT NULL
-      `;
+      // Create a condition to filter by the given community_id
+      const whereCondition = `a.community = ${db.escape(community_id)}`;
 
-      const groupByClause = `
-        GROUP BY ka.name, ac.amenity_category
-      `;
-
-      // Fetch data using the DatabaseService
+      // Fetch the data using the DatabaseService
       const results = await this.dbService.getJoinedData(
         tableName,
         joinClauses,
         fieldNames,
-        `${whereCondition} ${groupByClause}`
+        whereCondition
       );
 
-      if (!results.length) {
-        return res.status(404).json({
-          message: "No amenities found.",
-          data: [],
-        });
-      }
-
+      // Return the results in a successful response
       res.status(200).json({
         message: "Amenities retrieved successfully.",
-        data: results,
+        result: results, // List of amenities for the given community_id
       });
     } catch (error) {
+      // Log and return any errors that occur during the process
       console.error("Error fetching amenities:", error.message);
       res.status(500).json({
         error: "An error occurred while fetching amenities.",
-        details: error.message,
+        details: error.message, // Provide the error details for debugging
       });
     }
   }
 
-  async addAmenities(req, res) {
-    const { community_id, amenity_ids } = req.body; // Extract community_id and amenity_ids from the request body
 
-    // Validate input
-    if (!community_id || !Array.isArray(amenity_ids) || amenity_ids.length === 0) {
-      return res.status(400).json({
-        error: "Invalid input. Provide a community_id and a non-empty array of amenity_ids.",
-      });
-    }
 
+
+  async importAmenities(req, res) {
+    const { source_community_id, target_community_id } = req.query;
+  
     try {
-      const tableName = "dy_amenities"; // Target table
-      const fieldNames = "amenity, community"; // Fields to insert
-
-      // Store any errors during insertion
-      const errors = [];
-
-      // Insert each amenity for the given community_id
-      for (const amenity_id of amenity_ids) {
-        try {
-          // Create field values for the stored procedure
-          const fieldValues = `${amenity_id}, ${community_id}`;
-
-          // Call the helper method to add a new record
-          // await this.addNewRecord(tableName, fieldNames, fieldValues);
+      // Validate the required parameters
+      if (!source_community_id || !target_community_id) {
+        return res.status(400).json({
+          error: "Both source_community_id and target_community_id are required.",
+        });
+      }
+  
+      // Fetch all amenities associated with the source community ID
+      const whereCondition = `community = ${db.escape(source_community_id)}`;
+      const amenities = await this.dbService.getRecordsByFields(
+        "dy_amenities",
+        "amenity",
+        whereCondition
+      );
+  
+      if (amenities.length === 0) {
+        return res.status(404).json({
+          message: "No amenities found for the provided source_community_id.",
+        });
+      }
+  
+      // Track which amenities were added and which were already present
+      const addedAmenities = [];
+      const existingAmenities = [];
+  
+      // Insert each amenity into the dy_amenities table for the target community ID
+      const insertPromises = amenities.map(async (amenity) => {
+        // Check if the amenity already exists for the target community
+        const whereCondition = `amenity = ${db.escape(
+          amenity.amenity
+        )} AND community = ${db.escape(target_community_id)}`;
+        const existingAmenity = await this.dbService.getRecordsByFields(
+          "dy_amenities",
+          "id",
+          whereCondition
+        );
+  
+        if (existingAmenity.length === 0) {
+          // If it doesn't exist, insert the amenity
+          const insertData = {
+            amenity: amenity.amenity,
+            community: target_community_id,
+          };
+  
           await this.dbService.addNewRecord(
-            tableName,
-            fieldNames,
-            fieldValues
+            "dy_amenities",
+            Object.keys(insertData).join(", "),
+            Object.values(insertData)
+              .map((value) => db.escape(value))
+              .join(", ")
           );
-        } catch (error) {
-          console.error(
-            `Failed to add amenity_id ${amenity_id} for community_id ${community_id}:`,
-            error.message
-          );
-          errors.push({ amenity_id, error: error.message });
+          addedAmenities.push(amenity.amenity); // Track added amenity
+        } else {
+          existingAmenities.push(amenity.amenity); // Track existing amenity
         }
+      });
+  
+      // Wait for all insert operations to complete
+      await Promise.all(insertPromises);
+  
+      // Return a detailed success response
+      let message = "Amenities import process completed.";
+      if (addedAmenities.length > 0) {
+        message += ` Added: ${addedAmenities.join(", ")}.`;
       }
-
-      // Check for errors and send an appropriate response
-      if (errors.length > 0) {
-        return res.status(207).json({
-          message: "Some amenities were not added successfully.",
-          errors,
-        });
+      if (existingAmenities.length > 0) {
+        message += ` Already present: ${existingAmenities.join(", ")}.`;
       }
-
-      // If all amenities are added successfully, send a success response
+  
       res.status(200).json({
-        message: "All amenities added successfully to the community.",
+        message,
+        added_amenities: addedAmenities.length,
+        existing_amenities: existingAmenities.length,
       });
     } catch (error) {
-      // Log and handle unexpected errors
-      console.error("Error inserting amenities:", error.message);
+      // Log and return any errors that occur during the process
+      console.error("Error cloning amenities:", error.message);
       res.status(500).json({
-        error: "An unexpected error occurred while adding amenities.",
-        details: error.message,
+        error: "An error occurred while cloning amenities.",
+        details: error.message, // Provide the error details for debugging
       });
     }
   }
-
-
-}
-
-
-class AddCommunitiesController extends BaseController {
-  async addcommunities(req, res) {
-    const {
-      name,
-      map_url,
-      total_area,
-      open_area,
-      nblocks,
-      nfloors_per_block,
-      nhouses_per_floor,
-      address,
-      major_area,
-      builder_id,
-      totflats,
-      status,
-      default_images,
-      rstatus,
-      amenities,
-      landmarks,
-    } = req.body;
-
-    // Validate required fields
-    if (
-      !name ||
-      !map_url ||
-      !total_area ||
-      !open_area ||
-      !nblocks ||
-      !nfloors_per_block ||
-      !nhouses_per_floor ||
-      !address ||
-      !major_area ||
-      !builder_id ||
-      !totflats ||
-      !status ||
-      !default_images ||
-      !rstatus
-    ) {
-      return res.status(400).json({
-        error: 'All required fields must be provided.',
-      });
-    }
-
-    try {
-      const tableName = 'st_community';
-      const fieldNames = [
-        'name',
-        'map_url',
-        'total_area',
-        'open_area',
-        'nblocks',
-        'nfloors_per_block',
-        'nhouses_per_floor',
-        'address',
-        'major_area',
-        'builder_id',
-        'totflats',
-        'status',
-        'default_images',
-        'rstatus',
-      ];
-
-      const fieldValues = [
-        name,
-        map_url,
-        total_area,
-        open_area,
-        nblocks,
-        nfloors_per_block,
-        nhouses_per_floor,
-        address,
-        major_area,
-        builder_id,
-        totflats,
-        status,
-        default_images,
-        rstatus,
-      ];
-
-      // Step 1: Insert the community record
-      const insertFields = fieldNames.join(', ');
-      const insertValues = fieldValues.map((value) => db.escape(value)).join(', ');
-
-
-      const communityResult = await this.dbService.addNewRecord(tableName, insertFields, insertValues);
-
-
-      // Ensure that insertId exists and is valid
-      if (communityResult && communityResult[0] && communityResult[0].insertId) {
-        const communityId = communityResult[0].insertId; // Get the inserted community ID
-
-        // Step 2: Add amenities records (if any)
-        if (amenities && Array.isArray(amenities)) {
-          for (const amenity of amenities) {
-            const amenityTable = 'dy_amenities';
-            const amenityFields = ['amenity', 'community'];
-            const amenityValues = [amenity, communityId];
-            const amenityInsertFields = amenityFields.join(', ');
-            const amenityInsertValues = amenityValues.map((value) => db.escape(value)).join(', ');
-
-
-            await this.dbService.addNewRecord(amenityTable, amenityInsertFields, amenityInsertValues);
-          }
-        }
-
-        // Step 3: Add landmarks records (if any)
-        if (landmarks && Array.isArray(landmarks)) {
-          for (const landmark of landmarks) {
-            const landmarkTable = 'dy_landmarks';
-            const landmarkFields = ['landmark_name', 'distance', 'landmark_category_id', 'community_id'];
-            const landmarkValues = [
-              landmark.landmark_name,
-              landmark.distance,
-              landmark.landmark_category_id,
-              communityId,
-            ];
-            const landmarkInsertFields = landmarkFields.join(', ');
-            const landmarkInsertValues = landmarkValues.map((value) => db.escape(value)).join(', ');
-
-
-            await this.dbService.addNewRecord(landmarkTable, landmarkInsertFields, landmarkInsertValues);
-          }
-        }
-
-        // Send success response
-        res.status(200).json({
-          message: 'Community, amenities, and landmarks added successfully.',
-        });
-      } else {
-        // Log the error if insertId is missing
-        console.error('Failed to insert community record:', communityResult);
-        res.status(500).json({
-          error: 'An error occurred while inserting the community record.',
-          details: 'No insertId returned from the database.',
-        });
-      }
-    } catch (error) {
-      // Log error details and send error response
-      console.error('Error adding community:', error.message);
-      res.status(500).json({
-        error: 'An error occurred while adding the community, amenities, and landmarks.',
-        details: error.message,
-      });
-    }
-  }
-
-  
-  
-  
-  
-  
-  
 }
 
 module.exports = {
@@ -1531,8 +1615,7 @@ module.exports = {
   UserController,
   LandMarksController,
   CityBasedCommunitiesController,
-  AmenitiesController,
-  AddCommunitiesController
+  AmenitiesController
 
 
 };

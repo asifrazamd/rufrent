@@ -42,11 +42,7 @@ class PaymentService extends BaseController {
             throw new Error(error.message);
         }
     }
-    
-
-  
       
-
     // Method to verify the payment status
     async verifyPayment({ razorpay_payment_id, razorpay_order_id, user_id, property_id }) {
         try {

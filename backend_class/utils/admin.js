@@ -2,10 +2,7 @@ const db = require("../config/db"); // Database db
 require('dotenv').config();
 
 class AdminManager {
-  /**
-   * Fetch all table names from the database where the name starts with 'st_'.
-   * @returns {Promise<Array>} List of table names.
-   */
+  
   async getSTTables() {
     try {
       const query = `
@@ -35,12 +32,6 @@ class AdminManager {
     }
   }
 
-
-  /**
-   * Fetch all column names for a given table.
-   * @param {string} tableName - The name of the table.
-   * @returns {Promise<Array>} List of column names.
-   */
   async getTableFields(tableName) {
     try {
       const query = `
@@ -56,10 +47,6 @@ class AdminManager {
     }
   }
 
-  /**
-   * Fetch all tables with names starting with 'st_' and their associated fields.
-   * @returns {Promise<Array>} List of tables and their fields.
-   */
   async getTablesWithFields() {
     try {
       // Step 1: Fetch all tables
@@ -83,6 +70,7 @@ class AdminManager {
       throw error;
     }
   }
+
   async getDyTablesWithFields() {
     try {
       // Step 1: Fetch all tables

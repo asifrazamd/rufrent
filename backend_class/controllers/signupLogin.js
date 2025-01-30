@@ -87,7 +87,6 @@ class AuthController extends BaseController {
   }
 
 
-
   async g_login(req, res) {
     const { uid, email, displayName, mobile_no, token, role_id } = req.body;
   

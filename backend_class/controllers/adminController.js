@@ -1,9 +1,7 @@
-
 const AdminManager = require('../utils/admin'); // Adjust the path as needed
 const DatabaseService = require('../utils/service'); // Correct import path
 const db = require("../config/db"); // Database connection object
 const { propertyFields, fieldNames1 } = require("../utils/joins");
-const authenticate=require("../middleware/authenticate");
 require('dotenv').config();
 const BaseController = require("../utils/baseClass"); // Adjust the path as needed
 
