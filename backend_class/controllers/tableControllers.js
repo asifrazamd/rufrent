@@ -63,6 +63,101 @@ class FMController extends BaseController {
 }
 
 class PropertyController extends BaseController {
+
+  async createProperty(req, res) {
+    try {
+      // Log to check if req.body.propertyData is received
+      console.log("Received property data:", req.body.propertyData);
+
+      // Ensure req.body.propertyData is parsed correctly
+      let propertyData = JSON.parse(req.body.propertyData); // Parse the JSON string
+
+      // Required fields
+      const requiredFields = [
+        "user_id",
+        "prop_type_id",
+        "prop_desc_id",
+        "community_id",
+        "no_beds",
+        "no_baths",
+        "no_balconies",
+        "tenant_type_id",
+        "tenant_eat_pref_id",
+        "parking_count_id",
+        "tower_no",
+        "floor_no",
+        "flat_no",
+        "rental_low",
+        "maintenance_id",
+        "rental_high",
+      ];
+
+      // Convert numeric fields correctly
+      requiredFields.forEach((field) => {
+        if (!isNaN(propertyData[field])) {
+          propertyData[field] = Number(propertyData[field]);
+        }
+      });
+
+      // Log the final propertyData
+      console.log("Final propertyData after conversion:", propertyData);
+
+      // Insert the new property record
+      const tableName = "dy_property";
+      const fieldNames = requiredFields.join(", ");
+      const fieldValues = requiredFields
+        .map((field) => db.escape(propertyData[field]))
+        .join(", ");
+
+      console.log("SQL Insert Values:", fieldValues);
+
+      // Insert into database
+      const [result] = await this.dbService.addNewRecord(
+        tableName,
+        fieldNames,
+        fieldValues
+      );
+
+      // Debug: Log result from DB insert
+      console.log("Database Insert Result:", result);
+
+      if (!result || result.length === 0 || !result.insertId) {
+        throw new Error("Failed to insert property");
+      }
+
+      const propertyId = result.insertId;
+      console.log("Property ID:", propertyId);
+
+      let folderUrl = null;
+
+      console.log("image...Files", req.files);
+      // Process images if uploaded
+      if (req.files && req.files.length > 0) {
+        console.log("Files uploaded:", req.files);
+        folderUrl = await S3Service.uploadImages(req.files, propertyId);
+        console.log("Folder URL after uploading images:", folderUrl);
+
+        // Update the property record with the image folder URL
+        await this.dbService.updateRecord(
+          "dy_property",
+          { images_location: folderUrl },
+          `id = ${db.escape(propertyId)}`
+        );
+      }
+
+      return res.status(201).json({
+        message: "Property created successfully",
+        propertyId,
+        imagesLocation: folderUrl,
+      });
+    } catch (error) {
+      console.error("Error creating property:", error);
+      res
+        .status(500)
+        .json({ message: "Error creating property", error: error.message });
+    }
+  }
+
   async showPropDetails(req, res) {
     try {
       const {
@@ -86,7 +181,7 @@ class PropertyController extends BaseController {
       const joinClauses = `
         ${propertyFields}
       `;
-      const fieldNames = fieldNames1;
+      const fieldNames = `${fieldNames1}`;
 
       const whereClauses = [];
 
@@ -162,13 +257,21 @@ class PropertyController extends BaseController {
 
           const landmarks = await this.landMarks({ community_id: property.community_id });
 
+                          // Construct image URLs
+                          let images = [];
+                          if (property.images_location) {
+                              images = await S3Service.getS3Images(property.images_location);
+                          }
+          
 
           return {
             ...property,
+            images, // Include images in response
             pincode,
             pincode_url: pincodeUrl,
             amenities,
             landmarks
+
           };
         })
       );
@@ -286,124 +389,132 @@ class UserActionsController extends BaseController {
   async getUserActions(req, res) {
     try {
       const { user_id, property_id, id } = req.query;
-
+  
       // Define the main table and joins
       const tableName = "dy_user_actions ua";
       const joinClauses = `
-LEFT JOIN 
-    dy_user u ON ua.user_id = u.id
-LEFT JOIN 
-    dy_property dy ON ua.property_id = dy.id
-
-    ${propertyFields}
-LEFT JOIN 
-    st_current_status scd ON ua.status_code = scd.id
+        LEFT JOIN dy_user u ON ua.user_id = u.id
+        LEFT JOIN dy_property dy ON ua.property_id = dy.id
+        ${propertyFields}
+        LEFT JOIN st_current_status scd ON ua.status_code = scd.id
       `;
-
+  
       // Define the fields to retrieve
       const fieldNames = `
-          ua.id AS action_id,
-    scd.status_code AS status_description,
-    scd.id as status_code_id,
-    ${fieldNames1}
+        ua.id AS action_id,
+        scd.status_code AS status_description,
+        scd.id as status_code_id,
+        ${fieldNames1}
       `;
-
+  
       // Build dynamic WHERE clause
       const whereClauses = [];
       if (id) whereClauses.push(`ua.status_code = ${db.escape(id)}`);
       if (user_id) whereClauses.push(`ua.user_id = ${db.escape(user_id)}`);
-      if (property_id)
-        whereClauses.push(`ua.property_id = ${db.escape(property_id)}`);
-
-      const whereCondition =
-        whereClauses.length > 0 ? whereClauses.join(" AND ") : "1";
-
+      if (property_id) whereClauses.push(`ua.property_id = ${db.escape(property_id)}`);
+  
+      const whereCondition = whereClauses.length > 0 ? whereClauses.join(" AND ") : "1";
+  
       // Fetch data using the DatabaseService
-      const results = await this.dbService.getJoinedData(
+      let results = await this.dbService.getJoinedData(
         tableName,
         joinClauses,
         fieldNames,
         whereCondition
       );
-
+  
+      // Fetch images for `results` based on `images_location`
+      for (let result of results) {
+        if (result.images_location) {
+          result.images = await S3Service.getS3Images(result.images_location);
+        } else {
+          result.images = [];
+        }
+      }
+  
       // Fetch matching properties for the given user_id
-let userProperties = [];
-if (user_id) {
-  const mainTable = "dy_transactions dt";
-  const joinClauses = `
-  LEFT JOIN dy_user u ON dt.rm_id = u.id
-  LEFT JOIN dy_property dy ON dt.prop_id = dy.id
-  LEFT JOIN st_current_status sct ON dt.cur_stat_code = sct.id
-
-  ${propertyFields}
-`;
-
-  const fields = `dt.prop_id,sct.status_code,dt.tr_st_time,u.user_name,u.mobile_no,${fieldNames1}`;
-  const whereClause = `dt.user_id = ${db.escape(user_id)}`;
-
-  // Fetch data using getJoinedData
-  userProperties = await this.dbService.getJoinedData(
-    mainTable,
-    joinClauses,
-    fields,
-    whereClause
-  );
-
-  const uniqueProperties = [];
-  const seenProps = new Set();
-
-  userProperties.forEach((item) => {
-    if (!seenProps.has(item.prop_id)) {
-      seenProps.add(item.prop_id);
-      uniqueProperties.push({
-        prop_id: item.prop_id,
-        property_added_at: item.tr_st_time,
-        user_name: item.user_name,
-        RM_mobile_no: item.mobile_no,
-        current_status:item.status_code,
-        id: item.id,
-        propert_current_status: item.current_status,
-        prop_type: item.prop_type,
-        home_type: item.home_type,
-        prop_desc: item.prop_desc,
-        community_name: item.community_name,
-        map_url: item.map_url,
-        total_area: item.total_area,
-        open_area: item.open_area,
-        nblocks: item.nblocks,
-        nfloors_per_block: item.nfloors_per_block,
-        nhouses_per_floor: item.nhouses_per_floor,
-        address: item.address,
-        totflats: item.totflats,
-        default_images: item.default_images,
-        nbeds: item.nbeds,
-        nbaths: item.nbaths,
-        nbalcony: item.nbalcony,
-        eat_pref: item.eat_pref,
-        parking_count: item.parking_count,
-        deposit: item.deposit,
-        maintenance_type: item.maintenance_type,
-        rental_low: item.rental_low,
-        rental_high: item.rental_high,
-        tower_no: item.tower_no,
-        floor_no: item.floor_no,
-        flat_no: item.flat_no,
-        images_location: item.images_location,
-        builder_name: item.builder_name,
-        city_name: item.city_name,
-      });
-    }
-  });
-
-  userProperties = uniqueProperties;
-}
-
-
+      let userProperties = [];
+      if (user_id) {
+        const mainTable = "dy_transactions dt";
+        const joinClauses = `
+          LEFT JOIN dy_user u ON dt.rm_id = u.id
+          LEFT JOIN dy_property dy ON dt.prop_id = dy.id
+          LEFT JOIN st_current_status sct ON dt.cur_stat_code = sct.id
+          ${propertyFields}`;
+  
+        const fields = `dt.prop_id, sct.status_code, dt.tr_st_time, u.user_name, u.mobile_no, ${fieldNames1}`;
+        const whereClause = `dt.user_id = ${db.escape(user_id)}`;
+  
+        // Fetch data using getJoinedData
+        userProperties = await this.dbService.getJoinedData(
+          mainTable,
+          joinClauses,
+          fields,
+          whereClause
+        );
+  
+        const uniqueProperties = [];
+        const seenProps = new Set();
+  
+        for (let item of userProperties) {
+          if (!seenProps.has(item.prop_id)) {
+            seenProps.add(item.prop_id);
+            
+            // Fetch images from S3 if `images_location` is available
+            let images = [];
+            if (item.images_location) {
+              images = await S3Service.getS3Images(item.images_location);
+            }
+  
+            uniqueProperties.push({
+              prop_id: item.prop_id,
+              property_added_at: item.tr_st_time,
+              user_name: item.user_name,
+              RM_mobile_no: item.mobile_no,
+              current_status: item.status_code,
+              id: item.id,
+              propert_current_status: item.current_status,
+              prop_type: item.prop_type,
+              home_type: item.home_type,
+              prop_desc: item.prop_desc,
+              community_name: item.community_name,
+              map_url: item.map_url,
+              total_area: item.total_area,
+              open_area: item.open_area,
+              nblocks: item.nblocks,
+              nfloors_per_block: item.nfloors_per_block,
+              nhouses_per_floor: item.nhouses_per_floor,
+              address: item.address,
+              totflats: item.totflats,
+              default_images: item.default_images,
+              nbeds: item.nbeds,
+              nbaths: item.nbaths,
+              nbalcony: item.nbalcony,
+              eat_pref: item.eat_pref,
+              parking_count: item.parking_count,
+              deposit: item.deposit,
+              maintenance_type: item.maintenance_type,
+              rental_low: item.rental_low,
+              rental_high: item.rental_high,
+              tower_no: item.tower_no,
+              floor_no: item.floor_no,
+              flat_no: item.flat_no,
+              images_location: item.images_location,
+              images: images,  // Added images from S3
+              builder_name: item.builder_name,
+              city_name: item.city_name,
+            });
+          }
+        }
+  
+        userProperties = uniqueProperties;
+      }
+  
       // Send the response with results
       res.status(200).json({
         message: "User actions retrieved successfully.",
         results,
-        userProperties
+        userProperties,
       });
     } catch (error) {
       console.error("Error fetching user actions:", error.message);
@@ -413,6 +524,7 @@ if (user_id) {
       });
     }
   }
+  
 }
 
 class TaskController extends BaseController {
@@ -1021,8 +1133,6 @@ INNER JOIN st_community ON p.community_id = st_community.id
   }
 }
 
-
-
 class UserProfile extends BaseController {
 
 
@@ -1616,6 +1726,4 @@ module.exports = {
   LandMarksController,
   CityBasedCommunitiesController,
   AmenitiesController
-
-
 };

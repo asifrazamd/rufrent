@@ -1,4 +1,5 @@
 require('dotenv').config();
+const multer = require('multer'); // <-- Import multer
 
 
 const express = require('express');
@@ -10,6 +11,9 @@ const { UserActionsController, PropertyController, FMController,TaskController,a
 
 // Initialize Express Router
 const router = express.Router();
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
+
 
 // Create an instance of FMController
 const fmController = new FMController();
@@ -34,6 +38,7 @@ const allAmenitiesController=new AmenitiesController();
 
 
 
+router.post('/AddProperty', upload.array('images',5), (req, res) => propertyController.createProperty(req, res));
 
 router.get('/getFmList', (req, res) => fmController.getFmList(req, res));
 
