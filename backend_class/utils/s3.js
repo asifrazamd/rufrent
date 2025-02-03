@@ -11,7 +11,7 @@ class S3Service {
       throw new Error('Property ID is required for uploading images.');
     }
 
-    const folderName = `property-images/${propertyId}`;
+    const folderName = `property_images/${propertyId}`;
 
     const uploadImagePromises = files.map(async (file) => {
       try {

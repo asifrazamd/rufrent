@@ -3,6 +3,10 @@ const db = require("../config/db"); // Database connection object
 const { propertyFields, fieldNames1 } = require("../utils/joins");
 require("dotenv").config();
 const BaseController = require("../utils/baseClass"); // Adjust the path as needed
+const S3Service = require("../utils/s3"); // Assuming s3Service is
+
+const { S3Client } = require("@aws-sdk/client-s3");
+const s3Client = new S3Client({ region: process.env.AWS_REGION });
 
 class FMController extends BaseController {
 
